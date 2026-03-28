@@ -26,6 +26,7 @@ from flask import Flask, render_template, request, redirect, url_for
 
 from logic import models
 from logic import settlement
+from logic.ticket_parser import parse_ticket_text
 
 
 def create_app():
@@ -146,6 +147,36 @@ def register_routes(flask_app):
 # ============================================================================
 # ROUTES: EXPENSES
 # ============================================================================
+
+    @flask_app.route('/parse_ticket', methods=['GET', 'POST'])
+    def parse_ticket():
+        """
+        Demo-friendly ticket parser flow.
+        GET: Show raw ticket text form
+        POST: Parse text and show review screen
+        """
+        if request.method == 'POST':
+            ticket_text = request.form.get('ticket_text', '')
+            parsed_result = parse_ticket_text(ticket_text)
+
+            # Keep compatibility with templates that still read `total`.
+            if 'total' not in parsed_result and 'total_detected' in parsed_result:
+                parsed_result = {
+                    **parsed_result,
+                    'total': parsed_result['total_detected'],
+                }
+
+            return render_template(
+                'review_ticket.html',
+                parsed_result=parsed_result,
+                form_action=url_for('parse_ticket')
+            )
+
+        return render_template(
+            'parse_ticket.html',
+            form_action=url_for('parse_ticket'),
+            ticket_text=''
+        )
 
     @flask_app.route('/add_expense/<int:group_id>', methods=['GET', 'POST'])
     def add_expense(group_id):
