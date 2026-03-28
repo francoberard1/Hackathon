@@ -195,12 +195,45 @@ def parse_line_item(line: str) -> dict | None:
     }
 
 
-def summarize_ticket_items(items: list[dict]) -> dict:
+def extract_total_detected(normalized_text: str) -> float | None:
+    """
+    Extract an explicit ticket total when present.
+
+    This is intentionally simple and hackathon-friendly:
+    - prefer lines that mention TOTAL
+    - ignore subtotal-like lines
+    - take the last price-like token from the matching line
+    """
+    if not normalized_text:
+        return None
+
+    total_candidates = []
+    for line in normalized_text.split("\n"):
+        upper_line = strip_accents(line).upper()
+        tokens = set(re.findall(r"[A-Z]+", upper_line))
+
+        if "TOTAL" not in tokens:
+            continue
+        if "SUBTOTAL" in tokens:
+            continue
+
+        matches = _find_price_matches(line)
+        if not matches:
+            continue
+
+        price = _parse_price_token(matches[-1].group(0))
+        if price is not None:
+            total_candidates.append(price)
+
+    return total_candidates[-1] if total_candidates else None
+
+
+def summarize_ticket_items(items: list[dict], total_detected: float | None = None) -> dict:
     """Build summary fields derived from parsed items."""
     subtotal = round(sum(item["price"] for item in items), 2)
     return {
         "subtotal": subtotal,
-        "total_detected": subtotal,
+        "total_detected": round(total_detected, 2) if total_detected is not None else subtotal,
         "warnings": [],
         "confidence": DEFAULT_CONFIDENCE if items else 0.0,
     }
@@ -212,6 +245,7 @@ def parse_ticket_text(raw_text: str) -> dict:
     """
     normalized_text = normalize_ocr_text(raw_text)
     candidate_lines = extract_candidate_lines(normalized_text)
+    detected_total = extract_total_detected(normalized_text)
 
     items = []
     rejected_lines = 0
@@ -223,7 +257,7 @@ def parse_ticket_text(raw_text: str) -> dict:
             continue
         items.append(parsed_item)
 
-    summary = summarize_ticket_items(items)
+    summary = summarize_ticket_items(items, total_detected=detected_total)
     warnings = list(summary["warnings"])
 
     if not normalized_text.strip():
