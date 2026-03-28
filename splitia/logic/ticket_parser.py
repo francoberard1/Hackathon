@@ -105,6 +105,7 @@ DEFAULT_CONFIDENCE = 0.72
 MAX_REASONABLE_PRICE = 99999.99
 MAX_DIGITS_WITHOUT_SEPARATORS = 5
 PRICE_TOKEN_RE = re.compile(r"(?<!\w)(?:[$€£]\s*)?\d[\d\.,]*")
+QUANTITY_PREFIX_RE = re.compile(r"^\s*\d+(?:[\.,]\d+)?(?:\s*[Xx])?\s+")
 
 
 def normalize_ocr_text(raw_text: str) -> str:
@@ -187,6 +188,36 @@ def looks_like_item_name(line: str) -> bool:
     return len(letters_only.replace(" ", "")) >= MIN_NAME_LENGTH
 
 
+def strip_quantity_prefix(line: str) -> str:
+    """Remove leading quantity markers like '2 ', '3x ', or '1.5 ' from an item line."""
+    return QUANTITY_PREFIX_RE.sub("", line, count=1).strip()
+
+
+def looks_like_quantity_prefixed_item(line: str) -> bool:
+    """
+    Accept item lines that start with a quantity and end with a valid price.
+
+    Examples:
+    - 3 COPERTO CENA 6.00
+    - 2 WATER 5.00
+    - 1x CAFE 2.50
+    """
+    if not QUANTITY_PREFIX_RE.match(line):
+        return False
+
+    matches = _find_price_matches(line)
+    if not matches:
+        return False
+
+    last_match = matches[-1]
+    trailing_text = line[last_match.end():].strip()
+    if trailing_text:
+        return False
+
+    middle_text = strip_quantity_prefix(line[: last_match.start()].strip())
+    return looks_like_item_name(middle_text)
+
+
 def extract_candidate_lines(normalized_text: str) -> list[str]:
     """
     Return lines that look like parseable ticket items.
@@ -200,7 +231,7 @@ def extract_candidate_lines(normalized_text: str) -> list[str]:
             continue
         if looks_like_address_or_contact_line(line):
             continue
-        if not has_reasonable_trailing_price(line):
+        if not (looks_like_quantity_prefixed_item(line) or has_reasonable_trailing_price(line)):
             continue
         if not has_price_candidate(line):
             continue
