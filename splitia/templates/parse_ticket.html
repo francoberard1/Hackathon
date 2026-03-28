@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parse Ticket - SplitIA</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .form-section {
+            max-width: 720px;
+        }
+
+        .form-group textarea,
+        .form-group input[type="file"] {
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 5px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+            font-family: inherit;
+            width: 100%;
+            background: white;
+        }
+
+        .form-group textarea {
+            min-height: 280px;
+            resize: vertical;
+        }
+
+        .form-group textarea:focus,
+        .form-group input[type="file"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🧾 SplitIA</h1>
+            <p>Parse Ticket</p>
+        </header>
+
+        <nav class="breadcrumb">
+            <a href="{{ url_for('index') }}">Home</a> > Parse Ticket
+        </nav>
+
+        <main>
+            <section class="section form-section">
+                <h2>Paste your ticket text</h2>
+                <p style="margin-bottom: 20px; color: #666;">
+                    Paste the raw ticket text to test the text-first parser. You can also attach an image if you want,
+                    but the manual text input is the main path for this screen.
+                </p>
+
+                <form method="POST" action="{{ form_action or '' }}" enctype="multipart/form-data" class="form">
+                    <div class="form-group">
+                        <label for="ticket_text">Ticket Text</label>
+                        <textarea
+                            id="ticket_text"
+                            name="ticket_text"
+                            placeholder="Example:
+SUPERMARKET XYZ
+2x Water 5.00
+Bread 3.50
+Total 13.50"
+                            required
+                            autofocus
+                        >{{ ticket_text or '' }}</textarea>
+                        <small>Paste the OCR output or write the ticket content manually.</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="ticket_image">Ticket Image (optional)</label>
+                        <input
+                            type="file"
+                            id="ticket_image"
+                            name="ticket_image"
+                            accept="image/*"
+                        >
+                        <small>Optional helper input for future OCR or demo flows. Not required to submit.</small>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-success">Process Ticket</button>
+                    </div>
+                </form>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>

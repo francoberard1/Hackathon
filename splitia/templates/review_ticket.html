@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Review Ticket - SplitIA</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .review-layout {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            align-items: start;
+        }
+
+        .review-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        .review-table th,
+        .review-table td {
+            padding: 12px;
+            border-bottom: 1px solid #e2e8f0;
+            text-align: left;
+            vertical-align: middle;
+        }
+
+        .review-table th {
+            color: #4a5568;
+            font-size: 0.95rem;
+            background: #f7fafc;
+        }
+
+        .review-table input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e2e8f0;
+            border-radius: 5px;
+            font-size: 1rem;
+            font-family: inherit;
+            transition: border-color 0.3s;
+            background: white;
+        }
+
+        .review-table input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .summary-card {
+            background: #f7fafc;
+            border-left: 4px solid #667eea;
+        }
+
+        .summary-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 15px;
+        }
+
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px;
+            background: white;
+            border-radius: 5px;
+        }
+
+        .summary-label {
+            color: #666;
+            font-weight: 600;
+        }
+
+        .summary-value {
+            color: #333;
+            font-weight: 700;
+        }
+
+        @media (max-width: 768px) {
+            .review-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .review-table,
+            .review-table thead,
+            .review-table tbody,
+            .review-table tr,
+            .review-table th,
+            .review-table td {
+                display: block;
+            }
+
+            .review-table thead {
+                display: none;
+            }
+
+            .review-table tr {
+                background: #f7fafc;
+                border-radius: 8px;
+                margin-bottom: 12px;
+                padding: 12px;
+            }
+
+            .review-table td {
+                border: none;
+                padding: 8px 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    {% set items = parsed_result["items"] if parsed_result and parsed_result["items"] is defined else [] %}
+    {% set totals = namespace(subtotal=0) %}
+    {% for item in items %}
+        {% set price_value = item["price"] | default(0) | float %}
+        {% set totals.subtotal = totals.subtotal + price_value %}
+    {% endfor %}
+
+    <div class="container">
+        <header>
+            <h1>🧾 SplitIA</h1>
+            <p>Review Parsed Ticket</p>
+        </header>
+
+        <nav class="breadcrumb">
+            <a href="{{ url_for('index') }}">Home</a> > Review Ticket
+        </nav>
+
+        <main>
+            <section class="section">
+                <h2>Review detected items</h2>
+                <p style="margin-bottom: 20px; color: #666;">
+                    Check the parsed ticket lines and correct anything that looks off before continuing.
+                    This screen is meant to make the parser output easy to validate during the demo.
+                </p>
+
+                <form method="POST" action="{{ form_action or '' }}" class="form">
+                    <div class="review-layout">
+                        <div>
+                            {% if items %}
+                                <table class="review-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 8%;">#</th>
+                                            <th style="width: 60%;">Item Name</th>
+                                            <th style="width: 32%;">Price</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for item in items %}
+                                            <tr>
+                                                <td>{{ loop.index }}</td>
+                                                <td>
+                                                    <input
+                                                        type="text"
+                                                        name="item_name_{{ loop.index0 }}"
+                                                        value="{{ item['name'] | default('') }}"
+                                                        placeholder="Item name"
+                                                        required
+                                                    >
+                                                </td>
+                                                <td>
+                                                    <input
+                                                        type="number"
+                                                        name="item_price_{{ loop.index0 }}"
+                                                        value="{{ '%.2f' | format(item['price'] | default(0) | float) }}"
+                                                        step="0.01"
+                                                        min="0"
+                                                        placeholder="0.00"
+                                                        required
+                                                    >
+                                                </td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                                <input type="hidden" name="item_count" value="{{ items | length }}">
+                            {% else %}
+                                <p class="empty-message">No items were detected in this parsed result.</p>
+                            {% endif %}
+                        </div>
+
+                        <section class="section summary-card">
+                            <h2>Parse Summary</h2>
+                            <div class="summary-list">
+                                <div class="summary-row">
+                                    <span class="summary-label">Detected items</span>
+                                    <span class="summary-value">{{ items | length }}</span>
+                                </div>
+
+                                <div class="summary-row">
+                                    <span class="summary-label">Items subtotal</span>
+                                    <span class="summary-value">${{ "%.2f" | format(totals.subtotal) }}</span>
+                                </div>
+
+                                <div class="summary-row">
+                                    <span class="summary-label">Detected total</span>
+                                    <span class="summary-value">
+                                        {% if parsed_result and parsed_result["total"] is defined and parsed_result["total"] is not none %}
+                                            ${{ "%.2f" | format(parsed_result["total"] | float) }}
+                                        {% else %}
+                                            Not available
+                                        {% endif %}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <p class="info-message">
+                                Edit names and prices if needed, then submit the reviewed version.
+                            </p>
+                        </section>
+                    </div>
+
+                    {% if items %}
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-success">Confirm Items</button>
+                        </div>
+                    {% endif %}
+                </form>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>
