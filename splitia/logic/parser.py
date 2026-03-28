@@ -1,197 +1,149 @@
-# ============================================================================
-# PARSER.PY
-# ============================================================================
-# Placeholder functions for future AI integration.
-#
-# This module is a stub for AI-assisted expense parsing.
-# Currently, all functions return mock data.
-#
-# Future integrations:
-# 1. Audio transcription (OpenAI Whisper API or similar)
-# 2. Text/ticket OCR parsing (Google Vision API or similar)
-# 3. Named Entity Recognition (NER) to extract amounts and names
-#
-# For now: Just structure the code so you can add real APIs later.
-# ============================================================================
+import os
+import re
+from pathlib import Path
+from dotenv import load_dotenv
+from openai import OpenAI
+
+load_dotenv()
+
+_AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".ogg", ".webm"}
 
 
-def parse_audio_expense(audio_text):
-    """
-    Parse an audio transcription to extract expense information.
-    
-    INPUT EXAMPLE:
-        "I paid twenty-five dollars for pizza with three people"
-    
-    OUTPUT SHOULD BE:
-        {
-            'description': str,        # What was bought? (e.g., "Pizza")
-            'total_amount': float,     # Total cost
-            'participants': list,      # Who participated? (names or generic)
-            'confidence': float,       # How confident is the parsing? (0-1)
-            'raw_text': str
-        }
-    
-    FUTURE: Integrate with:
-    - OpenAI Whisper (for audio to text)
-    - spaCy or BERT (for NER - extract entities like amounts and names)
-    - Custom rules for currency detection
-    
-    Args:
-        audio_text (str): Transcribed audio text
-    
-    Returns:
-        dict: Structured expense data
-    """
-    
-    # TODO: Implement real parsing with NLP
-    # For now, return mock data
-    
-    mock_result = {
-        'description': 'AI Parsed Expense',
-        'total_amount': 0.0,
-        'participants': [],
-        'confidence': 0.0,
-        'raw_text': audio_text,
-        'status': 'placeholder',
-        'note': 'Real audio parsing coming soon!'
-    }
-    
-    return mock_result
+def _parse_number(s: str) -> float:
+    s = s.replace("$", "").replace("€", "").strip()
+    s = s.replace(",", ".")
+    return float(s)
 
 
-def parse_ticket_and_audio(ticket_text, audio_text):
-    """
-    Parse both a ticket (image/text) and audio to extract expense info.
-    This combines two sources for better accuracy.
-    
-    SCENARIO:
-    - User takes a photo of a receipt (OCR extracted as ticket_text)
-    - User also speaks what the expense is for (transcribed as audio_text)
-    - Combine to get best guess at who owes what
-    
-    FUTURE: Integrate with:
-    - Google Cloud Vision (for receipt OCR)
-    - Tesseract (open-source OCR)
-    - Fuzzy matching to reconcile ticket vs. audio data
-    
-    Args:
-        ticket_text (str): Extracted text from receipt/invoice
-        audio_text (str): Transcribed audio from user
-    
-    Returns:
-        dict: Combined structured expense data
-    """
-    
-    # TODO: Implement real dual-source parsing
-    # For now, return mock data
-    
-    mock_result = {
-        'description': 'Receipt + Audio Expense',
-        'total_amount': 0.0,
-        'participants': [],
-        'confidence': 0.0,
-        'ticket_text': ticket_text,
-        'audio_text': audio_text,
-        'status': 'placeholder',
-        'note': 'Real dual-source parsing coming soon!'
-    }
-    
-    return mock_result
+def transcribe_audio(audio_file_path: str) -> str:
+    path = Path(audio_file_path)
+
+    if not path.exists():
+        raise FileNotFoundError(f"Archivo no encontrado: {audio_file_path}")
+
+    if path.suffix.lower() not in _AUDIO_EXTS:
+        raise ValueError(f"Formato de audio no soportado: {path.suffix}")
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return "esto fue una compra de 10, juan gastó 8 y sofi 2"
+
+    client = OpenAI(api_key=api_key)
+
+    try:
+        with open(path, "rb") as f:
+            resp = client.audio.transcriptions.create(
+                model="gpt-4o-transcribe",
+                file=f
+            )
+    except Exception as e:
+        raise RuntimeError(f"Error al transcribir audio: {e}")
+
+    text = resp.get("text") if isinstance(resp, dict) else getattr(resp, "text", None)
+
+    if not text:
+        raise RuntimeError("No se obtuvo texto")
+
+    return text
 
 
-def extract_amount(text):
-    """
-    Help function: Extract monetary amounts from text.
-    
-    EXAMPLES:
-    - "It cost $25" → 25.0
-    - "fifty dollars" → 50.0
-    - "USD 100.50" → 100.50
-    
-    FUTURE: Use regex + word-to-number conversion
-    
-    Args:
-        text (str): Input text
-    
-    Returns:
-        list: List of found amounts
-    """
-    # TODO: Implement real extraction
-    return []
+def _extract_total(text: str):
+    m = re.search(r"(?:compra|total|importe|valor).*?(\d+[.,]?\d*)", text)
+    if m:
+        return _parse_number(m.group(1))
 
+    m = re.search(r"\b(\d+[.,]?\d*)\b", text)
+    if m:
+        return _parse_number(m.group(1))
 
-def extract_participants(text, group_members=None):
-    """
-    Help function: Extract participant names from text.
-    
-    EXAMPLES:
-    - "with Alice and Bob" → ['Alice', 'Bob']
-    - "John paid, 3 people split" → ['John', and 2 others]
-    
-    FUTURE: Use NER + fuzzy matching against group members
-    
-    Args:
-        text (str): Input text
-        group_members (list): Known members to match against
-    
-    Returns:
-        list: Extracted participant names/IDs
-    """
-    # TODO: Implement real extraction with NER
-    return []
-
-
-def estimate_number_of_people(text):
-    """
-    Help function: Try to estimate the number of people in an expense.
-    
-    EXAMPLES:
-    - "split 3 ways" → 3
-    - "for two of us" → 2
-    - "each person pays" → unknown
-    
-    Args:
-        text (str): Input text
-    
-    Returns:
-        int: Estimated count, or None if unknown
-    """
-    # TODO: Implement regex pattern matching
     return None
 
 
-# ============================================================================
-# FUTURE API INTEGRATION EXAMPLES
-# ============================================================================
+def _extract_allocations(text: str):
+    allocations = {}
 
-"""
-EXAMPLE 1: Using OpenAI Whisper for audio transcription
-----
-import openai
+    pattern = re.findall(
+        r"([a-zA-Záéíóúñ]+)\s*(?:gasto|gastó|pago|pagó)?\s*(\d+[.,]?\d*)",
+        text,
+    )
 
-def transcribe_audio(audio_file_path):
-    with open(audio_file_path, "rb") as audio_file:
-        transcript = openai.Audio.transcribe("whisper-1", audio_file)
-    return transcript["text"]
+    for name, amount in pattern:
+        allocations[name.title()] = _parse_number(amount)
 
-EXAMPLE 2: Using spaCy for Named Entity Recognition
-----
-import spacy
+    return allocations
 
-nlp = spacy.load("en_core_web_sm")
 
-def extract_entities(text):
-    doc = nlp(text)
-    entities = [(ent.text, ent.label_) for ent in doc.ents]
-    return entities
+def _extract_only_participants(text: str):
+    m = re.search(r"solo(?: entre)? (.+)", text)
+    if not m:
+        return []
 
-EXAMPLE 3: Using regex for amount extraction
-----
-import re
+    names = re.split(r",| y ", m.group(1))
+    return [n.strip().title() for n in names if n.strip()]
 
-def extract_amounts(text):
-    pattern = r'\$?(\d+\.?\d*)'
-    matches = re.findall(pattern, text)
-    return [float(m) for m in matches]
 
-"""
+def _extract_excludes(text: str):
+    excludes = re.findall(r"(?:sin|menos|excepto) ([a-zA-Záéíóúñ]+)", text)
+    return [e.title() for e in excludes]
+
+
+def parse_transcript(transcript: str) -> dict:
+    text = transcript.lower().strip()
+
+    allocations = _extract_allocations(text)
+    total = _extract_total(text)
+    only = _extract_only_participants(text)
+    excludes = _extract_excludes(text)
+
+    result = {
+        "transcript": transcript,
+        "total_amount": None,
+        "split_type": "unknown",
+        "participants": [],
+        "allocations": {},
+        "excluded_members": excludes,
+    }
+
+    # 🔹 Caso 1: custom
+    if allocations:
+        total_calc = sum(allocations.values())
+
+        if total is None:
+            total = total_calc
+
+        if abs(total - total_calc) > 0.01:
+            raise ValueError("Las cuentas no cierran")
+
+        result.update({
+            "total_amount": total,
+            "split_type": "custom",
+            "participants": list(allocations.keys()),
+            "allocations": allocations
+        })
+        return result
+
+    # 🔹 Caso 2: solo
+    if only and total:
+        share = total / len(only)
+        result.update({
+            "total_amount": total,
+            "split_type": "equal",
+            "participants": only,
+            "allocations": {p: round(share, 2) for p in only}
+        })
+        return result
+
+    # 🔹 Caso 3: fallback
+    if total:
+        participants = ["A", "B"]
+        share = total / 2
+
+        result.update({
+            "total_amount": total,
+            "split_type": "equal",
+            "participants": participants,
+            "allocations": {p: round(share, 2) for p in participants}
+        })
+        return result
+
+    return result
