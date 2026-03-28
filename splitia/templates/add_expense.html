@@ -1,4 +1,3 @@
-<h1>TEST CAMBIO</h1>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -61,6 +60,12 @@
                                 <option value="{{ member.id }}">{{ member.name }}</option>
                             {% endfor %}
                         </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="expense_date">Expense date</label>
+                        <input type="date" id="expense_date" name="expense_date">
+                        <small>Optional. Used for fairness patterns and payer streaks.</small>
                     </div>
 
                     <!-- Participants Field (Checkboxes) -->

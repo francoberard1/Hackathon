@@ -11,7 +11,7 @@ change when the persistence backend changes.
 # In-memory storage (local MVP mode)
 groups = {}          # {group_id: {'id', 'name', 'members'}}
 users = {}           # {user_id: {'id', 'name', 'group_id'}}
-expenses = {}        # {expense_id: {'id', 'description', 'total_amount', 'payer_id', 'group_id'}}
+expenses = {}        # {expense_id: {'id', 'description', 'total_amount', 'payer_id', 'group_id', 'date'}}
 expense_shares = {}  # {share_id: {'id', 'expense_id', 'user_id', 'amount'}}
 
 # Mutable counters to generate unique IDs without global statements.
@@ -92,7 +92,7 @@ def delete_user_record(user_id):
     del users[user_id]
 
 
-def insert_expense(description, total_amount, payer_id, group_id):
+def insert_expense(description, total_amount, payer_id, group_id, expense_date=None):
     """Create an expense record."""
     counters['expense'] += 1
     expense_id = counters['expense']
@@ -102,7 +102,8 @@ def insert_expense(description, total_amount, payer_id, group_id):
         'description': description,
         'total_amount': total_amount,
         'payer_id': payer_id,
-        'group_id': group_id
+        'group_id': group_id,
+        'date': expense_date
     }
     return expense_id
 

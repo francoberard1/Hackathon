@@ -50,6 +50,33 @@
                 </div>
             </section>
 
+            <section class="section">
+                <h2>Fairness Insights</h2>
+
+                {% if fairness_insights %}
+                    <div class="insights-list">
+                        {% for insight in fairness_insights %}
+                            <div class="insight-item">{{ insight }}</div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="empty-message">No fairness insights yet.</p>
+                {% endif %}
+
+                {% if fairness_metrics %}
+                    <div class="fairness-metrics">
+                        {% for metric in fairness_metrics %}
+                            <div class="fairness-row">
+                                <strong>{{ metric.name }}</strong>
+                                <span>Paid ${{ "%.2f" | format(metric.total_paid) }}</span>
+                                <span>Should pay ${{ "%.2f" | format(metric.should_have_paid) }}</span>
+                                <span>{{ metric.payment_count }} payments</span>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </section>
+
             <!-- Transactions Section -->
             <section class="section">
                 <h2>💳 Transactions Needed to Settle</h2>

@@ -10,6 +10,8 @@ Why this split helps:
 - data_access can be swapped later for Supabase/Postgres queries
 """
 
+from datetime import date
+
 from . import data_access
 
 
@@ -87,7 +89,18 @@ def delete_user(user_id):
 # EXPENSE FUNCTIONS
 # ============================================================================
 
-def create_expense(description, total_amount, payer_id, group_id, participants):
+def _normalize_expense_date(expense_date):
+    """Return a valid ISO date string for an expense."""
+    if not expense_date:
+        return date.today().isoformat()
+
+    try:
+        return date.fromisoformat(expense_date).isoformat()
+    except ValueError:
+        return date.today().isoformat()
+
+
+def create_expense(description, total_amount, payer_id, group_id, participants, expense_date=None):
     """
     Create a new expense.
     Args:
@@ -96,6 +109,7 @@ def create_expense(description, total_amount, payer_id, group_id, participants):
         payer_id (int): Who paid? (user ID)
         group_id (int): Which group?
         participants (list): List of user IDs who share this expense (with equal split)
+        expense_date (str | None): Optional ISO date for the expense
     Returns:
         int: ID of the newly created expense
     """
@@ -107,7 +121,13 @@ def create_expense(description, total_amount, payer_id, group_id, participants):
 
     # Future Supabase note:
     # This can become an INSERT into "expenses" plus many rows in "expense_shares".
-    expense_id = data_access.insert_expense(description, total_amount, payer_id, group_id)
+    expense_id = data_access.insert_expense(
+        description,
+        total_amount,
+        payer_id,
+        group_id,
+        expense_date=_normalize_expense_date(expense_date)
+    )
 
     # Create shares (each participant owes equal amount)
     share_amount = total_amount / len(participants)

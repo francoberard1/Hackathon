@@ -103,15 +103,17 @@ def register_routes(flask_app):
         # Get group expenses
         expenses = models.get_expenses_in_group(group_id)
 
-        # Get balances for each member
-        balances = settlement.calculate_balances(group_id)
+        # Get balances plus fairness insights for each member
+        fairness_data = settlement.calculate_fairness_data(group_id)
 
         return render_template(
             'group.html',
             group=group,
             members=members,
             expenses=expenses,
-            balances=balances
+            balances=fairness_data['balances'],
+            fairness_metrics=fairness_data['fairnessMetrics'],
+            fairness_insights=fairness_data['fairnessInsights']
         )
 
 
@@ -162,6 +164,7 @@ def register_routes(flask_app):
             description = request.form.get('description', '').strip()
             total_amount_str = request.form.get('total_amount', '0')
             payer_id = int(request.form.get('payer_id', 0))
+            expense_date = request.form.get('expense_date', '').strip()
 
             # Get participants (which users share this expense)
             # Form sends participant_<user_id> = "on" for checked boxes
@@ -174,7 +177,14 @@ def register_routes(flask_app):
             if description and total_amount_str and payer_id and participant_ids:
                 try:
                     total_amount = float(total_amount_str)
-                    models.create_expense(description, total_amount, payer_id, group_id, participant_ids)
+                    models.create_expense(
+                        description,
+                        total_amount,
+                        payer_id,
+                        group_id,
+                        participant_ids,
+                        expense_date=expense_date
+                    )
                     return redirect(url_for('group_detail', group_id=group_id))
                 except ValueError:
                     # Invalid amount, show form again
@@ -195,20 +205,22 @@ def register_routes(flask_app):
         """
         group = models.get_group(group_id)
         members = models.get_users_in_group(group_id)
-        balances = settlement.calculate_balances(group_id)
 
         if not group:
             return 'Group not found', 404
 
         # Calculate transactions needed to settle
         transactions = settlement.calculate_settlements(group_id)
+        fairness_data = settlement.calculate_fairness_data(group_id)
 
         return render_template(
             'settle.html',
             group=group,
             members=members,
-            balances=balances,
-            transactions=transactions
+            balances=fairness_data['balances'],
+            transactions=transactions,
+            fairness_metrics=fairness_data['fairnessMetrics'],
+            fairness_insights=fairness_data['fairnessInsights']
         )
 
 
