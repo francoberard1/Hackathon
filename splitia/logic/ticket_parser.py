@@ -36,6 +36,7 @@ IGNORED_LINE_KEYWORDS = {
 
 MIN_NAME_LENGTH = 2
 DEFAULT_CONFIDENCE = 0.72
+PRICE_TOKEN_RE = re.compile(r"(?<!\w)(?:[$€£]\s*)?\d[\d\.,]*")
 
 
 def normalize_ocr_text(raw_text: str) -> str:
@@ -69,7 +70,8 @@ def strip_accents(value: str) -> str:
 def is_ignored_line(line: str) -> bool:
     """Return True when a line matches a known non-item ticket concept."""
     upper_line = strip_accents(line).upper()
-    return any(keyword in upper_line for keyword in IGNORED_LINE_KEYWORDS)
+    tokens = set(re.findall(r"[A-Z]+", upper_line))
+    return any(keyword in tokens for keyword in IGNORED_LINE_KEYWORDS)
 
 
 def has_price_candidate(line: str) -> bool:
@@ -117,8 +119,7 @@ def _find_price_matches(line: str) -> list[re.Match[str]]:
     - 12000,50
     - $ 12.000,50
     """
-    pattern = re.compile(r"(?<!\w)(?:[$€£]\s*)?\d[\d\.,]*")
-    return list(pattern.finditer(line))
+    return list(PRICE_TOKEN_RE.finditer(line))
 
 
 def _parse_price_token(token: str) -> float | None:
@@ -248,3 +249,23 @@ def parse_ticket_text(raw_text: str) -> dict:
         "warnings": warnings,
         "confidence": confidence,
     }
+
+
+if __name__ == "__main__":
+    sample_text = """
+    HAMBURGUESA DOBLE      12500
+    PAPAS FRITAS           4500
+    GASEOSA 500ML          3200
+    SUBTOTAL               20200
+    IVA                    0
+    TOTAL                  20200
+    """
+
+    parsed = parse_ticket_text(sample_text)
+
+    print("Parsed items:")
+    for item in parsed["items"]:
+        print(f"- {item['name']}: {item['price']}")
+
+    print("\nFull payload:")
+    print(parsed)
