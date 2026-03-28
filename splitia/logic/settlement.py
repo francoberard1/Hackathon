@@ -12,48 +12,13 @@
 #    Uses a greedy algorithm to match creditors with debtors
 # ============================================================================
 
-from logic import models
+from . import balances
+from . import models
 
 
 def calculate_balances(group_id):
-    """
-    Calculate the balance for each user in a group.
-    
-    Balance formula:
-        balance = total_paid - total_owed
-    
-    Args:
-        group_id (int): ID of the group
-    
-    Returns:
-        dict: {user_id: balance, ...}
-        - Positive balance = user is owed money
-        - Negative balance = user owes money
-    """
-    
-    members = models.get_users_in_group(group_id)
-    balances = {}
-    
-    # Initialize all balances to 0
-    for member in members:
-        balances[member['id']] = 0.0
-    
-    # Get all expenses in the group
-    expenses = models.get_expenses_in_group(group_id)
-    
-    # For each expense, update balances
-    for expense in expenses:
-        # The payer gets credit (positive balance increase)
-        payer_id = expense['payer_id']
-        balances[payer_id] += expense['total_amount']
-        
-        # Each participant who shares the expense gets a debit (balance decrease)
-        shares = models.get_shares_for_expense(expense['id'])
-        for share in shares:
-            user_id = share['user_id']
-            balances[user_id] -= share['amount']
-    
-    return balances
+    """Compatibility wrapper around logic.balances.calculate_balances."""
+    return balances.calculate_balances(group_id)
 
 
 def calculate_settlements(group_id):
@@ -80,7 +45,7 @@ def calculate_settlements(group_id):
     """
     
     # Step 1: Calculate balances
-    balances = calculate_balances(group_id)
+    balance_map = calculate_balances(group_id)
     
     # Step 2: Separate creditors and debtors
     creditors = []  # [{'id': user_id, 'name': name, 'amount': owed_to_them}, ...]
@@ -91,7 +56,7 @@ def calculate_settlements(group_id):
     for member in members:
         user_id = member['id']
         user_name = member['name']
-        balance = balances.get(user_id, 0.0)
+        balance = balance_map.get(user_id, 0.0)
         
         # Round to avoid floating point errors
         balance = round(balance, 2)
@@ -159,14 +124,14 @@ def get_balance_summary(group_id):
         list: List of (user_name, balance_str) tuples
               For display on UI
     """
-    balances = calculate_balances(group_id)
+    balance_map = calculate_balances(group_id)
     members = models.get_users_in_group(group_id)
     
     summary = []
     for member in members:
         user_id = member['id']
         user_name = member['name']
-        balance = round(balances.get(user_id, 0.0), 2)
+        balance = round(balance_map.get(user_id, 0.0), 2)
         
         # Create user-friendly string
         if balance > 0:

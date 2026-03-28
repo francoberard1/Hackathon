@@ -1,29 +1,16 @@
-# ============================================================================
-# MODELS.PY
-# ============================================================================
-# This file defines the data structures for SplitIA.
-# We use simple in-memory dictionaries to store data (no database yet).
-# Each model is stored as a dictionary with an ID as the key.
-#
-# Models:
-# - Group: A group of people sharing expenses
-# - User: A person in a group
-# - Expense: A payment made by someone
-# - ExpenseShare: Who shares an expense and how much they owe
-# ============================================================================
+"""
+Domain-facing model API.
 
-# Global storage (in-memory)
-# In a real app, you'd use a database like SQLite or PostgreSQL
-groups = {}          # Groups: {group_id: {name, members}}
-users = {}           # Users: {user_id: {name, group_id}}
-expenses = {}        # Expenses: {expense_id: {description, total_amount, payer_id, group_id}}
-expense_shares = {}  # Shares: {share_id: {expense_id, user_id, amount}}
+This module is intentionally simple: routes call these functions,
+and these functions delegate storage work to logic.data_access.
 
-# Counter for generating unique IDs
-group_counter = 0
-user_counter = 0
-expense_counter = 0
-share_counter = 0
+Why this split helps:
+- routes stay focused on HTTP/UI concerns
+- business logic modules (balances/settlement) stay independent
+- data_access can be swapped later for Supabase/Postgres queries
+"""
+
+from . import data_access
 
 
 # ============================================================================
@@ -38,31 +25,24 @@ def create_group(name):
     Returns:
         int: ID of the newly created group
     """
-    global group_counter
-    group_counter += 1
-    groups[group_counter] = {
-        'id': group_counter,
-        'name': name,
-        'members': []  # List of user IDs in this group
-    }
-    return group_counter
+    # Future Supabase note:
+    # This call can later become an INSERT into the "groups" table.
+    return data_access.insert_group(name)
 
 
 def get_group(group_id):
     """Get a group by ID."""
-    return groups.get(group_id)
+    return data_access.fetch_group(group_id)
 
 
 def get_all_groups():
     """Get all groups."""
-    return list(groups.values())
+    return data_access.fetch_all_groups()
 
 
 def delete_group(group_id):
     """Delete a group and all its related data."""
-    if group_id in groups:
-        # This is a simple implementation; in real apps, be careful about cascading deletes
-        del groups[group_id]
+    data_access.delete_group_record(group_id)
 
 
 # ============================================================================
@@ -78,41 +58,29 @@ def create_user(name, group_id):
     Returns:
         int: ID of the newly created user
     """
-    global user_counter
-    
     # Check if group exists
-    if group_id not in groups:
+    group = data_access.fetch_group(group_id)
+    if not group:
         raise ValueError(f"Group {group_id} does not exist")
-    
-    user_counter += 1
-    users[user_counter] = {
-        'id': user_counter,
-        'name': name,
-        'group_id': group_id
-    }
-    
-    # Add user to group's member list
-    groups[group_id]['members'].append(user_counter)
-    
-    return user_counter
+
+    # Future Supabase note:
+    # This can become an INSERT into the "users" table.
+    return data_access.insert_user(name, group_id)
 
 
 def get_user(user_id):
     """Get a user by ID."""
-    return users.get(user_id)
+    return data_access.fetch_user(user_id)
 
 
 def get_users_in_group(group_id):
     """Get all users in a group."""
-    return [users[uid] for uid in groups[group_id]['members'] if uid in users]
+    return data_access.fetch_users_in_group(group_id)
 
 
 def delete_user(user_id):
     """Remove a user from the system."""
-    if user_id in users:
-        group_id = users[user_id]['group_id']
-        groups[group_id]['members'].remove(user_id)
-        del users[user_id]
+    data_access.delete_user_record(user_id)
 
 
 # ============================================================================
@@ -131,50 +99,37 @@ def create_expense(description, total_amount, payer_id, group_id, participants):
     Returns:
         int: ID of the newly created expense
     """
-    global expense_counter
-    
     # Check if user and group exist
-    if payer_id not in users:
+    if not data_access.fetch_user(payer_id):
         raise ValueError(f"User {payer_id} does not exist")
-    if group_id not in groups:
+    if not data_access.fetch_group(group_id):
         raise ValueError(f"Group {group_id} does not exist")
-    
-    # Create the expense
-    expense_counter += 1
-    expenses[expense_counter] = {
-        'id': expense_counter,
-        'description': description,
-        'total_amount': total_amount,
-        'payer_id': payer_id,
-        'group_id': group_id
-    }
-    
+
+    # Future Supabase note:
+    # This can become an INSERT into "expenses" plus many rows in "expense_shares".
+    expense_id = data_access.insert_expense(description, total_amount, payer_id, group_id)
+
     # Create shares (each participant owes equal amount)
     share_amount = total_amount / len(participants)
     for participant_id in participants:
-        create_expense_share(expense_counter, participant_id, share_amount)
-    
-    return expense_counter
+        create_expense_share(expense_id, participant_id, share_amount)
+
+    return expense_id
 
 
 def get_expense(expense_id):
     """Get an expense by ID."""
-    return expenses.get(expense_id)
+    return data_access.fetch_expense(expense_id)
 
 
 def get_expenses_in_group(group_id):
     """Get all expenses in a group."""
-    return [exp for exp in expenses.values() if exp['group_id'] == group_id]
+    return data_access.fetch_expenses_in_group(group_id)
 
 
 def delete_expense(expense_id):
     """Delete an expense and all its shares."""
-    if expense_id in expenses:
-        del expenses[expense_id]
-        # Also delete all shares for this expense
-        shares_to_delete = [sid for sid, share in expense_shares.items() if share['expense_id'] == expense_id]
-        for share_id in shares_to_delete:
-            del expense_shares[share_id]
+    data_access.delete_expense_record(expense_id)
 
 
 # ============================================================================
@@ -186,27 +141,17 @@ def create_expense_share(expense_id, user_id, amount):
     Create a share of an expense for a user.
     This means "user owes $amount for this expense".
     """
-    global share_counter
-    share_counter += 1
-    expense_shares[share_counter] = {
-        'id': share_counter,
-        'expense_id': expense_id,
-        'user_id': user_id,
-        'amount': amount
-    }
-    return share_counter
+    return data_access.insert_expense_share(expense_id, user_id, amount)
 
 
 def get_shares_for_expense(expense_id):
     """Get all shares for an expense."""
-    return [share for share in expense_shares.values() if share['expense_id'] == expense_id]
+    return data_access.fetch_shares_for_expense(expense_id)
 
 
 def get_shares_for_user_in_group(user_id, group_id):
     """Get all expense shares for a user in a specific group."""
-    user_shares = [share for share in expense_shares.values() if share['user_id'] == user_id]
-    # Filter to only expenses in this group
-    return [share for share in user_shares if expenses[share['expense_id']]['group_id'] == group_id]
+    return data_access.fetch_shares_for_user_in_group(user_id, group_id)
 
 
 # ============================================================================
@@ -215,12 +160,4 @@ def get_shares_for_user_in_group(user_id, group_id):
 
 def reset_data():
     """Clear all data. Useful for testing."""
-    global group_counter, user_counter, expense_counter, share_counter
-    groups.clear()
-    users.clear()
-    expenses.clear()
-    expense_shares.clear()
-    group_counter = 0
-    user_counter = 0
-    expense_counter = 0
-    share_counter = 0
+    data_access.reset_data_store()
