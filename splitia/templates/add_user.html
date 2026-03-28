@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Member - SplitIA</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>💰 {{ group.name }}</h1>
+            <p>Add a New Member</p>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="breadcrumb">
+            <a href="{{ url_for('index') }}">Home</a> > 
+            <a href="{{ url_for('group_detail', group_id=group.id) }}">{{ group.name }}</a> > 
+            Add Member
+        </nav>
+
+        <!-- Main Content -->
+        <main>
+            <section class="section form-section">
+                <form method="POST" class="form">
+                    <!-- User Name Field -->
+                    <div class="form-group">
+                        <label for="user_name">Member Name</label>
+                        <input 
+                            type="text" 
+                            id="user_name" 
+                            name="user_name" 
+                            placeholder="e.g., John, Alice, Bob"
+                            required
+                            autofocus
+                        >
+                        <small>What's their name?</small>
+                    </div>
+
+                    <!-- Buttons -->
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-success">Add Member</button>
+                        <a href="{{ url_for('group_detail', group_id=group.id) }}" class="btn btn-outline">Cancel</a>
+                    </div>
+                </form>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>

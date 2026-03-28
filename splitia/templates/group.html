@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ group.name }} - SplitIA</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>💰 {{ group.name }}</h1>
+            <p>Manage your shared expenses</p>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="breadcrumb">
+            <a href="{{ url_for('index') }}">Home</a> > {{ group.name }}
+        </nav>
+
+        <!-- Main Content -->
+        <main>
+            <!-- Members Section -->
+            <section class="section">
+                <h2>👥 Members ({{ members | length }})</h2>
+                
+                {% if members %}
+                    <ul class="members-list">
+                        {% for member in members %}
+                            <li>{{ member.name }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="empty-message">No members yet.</p>
+                {% endif %}
+                
+                <a href="{{ url_for('add_user', group_id=group.id) }}" class="btn btn-secondary">
+                    ➕ Add Member
+                </a>
+            </section>
+
+            <!-- Balances Section -->
+            <section class="section">
+                <h2>💵 Current Balances</h2>
+                
+                {% if balances %}
+                    <div class="balances-table">
+                        {% for user_id, balance in balances.items() %}
+                            {% set member = members | selectattr('id', 'equalto', user_id) | first %}
+                            {% if member %}
+                                <div class="balance-row">
+                                    <span class="balance-name">{{ member.name }}</span>
+                                    {% if balance > 0.01 %}
+                                        <span class="balance-positive">
+                                            ✅ Owed ${{ "%.2f" | format(balance) }}
+                                        </span>
+                                    {% elif balance < -0.01 %}
+                                        <span class="balance-negative">
+                                            ⚠️ Owes ${{ "%.2f" | format(balance | abs) }}
+                                        </span>
+                                    {% else %}
+                                        <span class="balance-settled">
+                                            ✔️ Settled
+                                        </span>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="empty-message">No expenses yet.</p>
+                {% endif %}</section>
+
+            <!-- Expenses Section -->
+            <section class="section">
+                <h2>📝 Expenses</h2>
+                
+                {% if expenses %}
+                    <div class="expenses-list">
+                        {% for expense in expenses %}
+                            {% set payer = members | selectattr('id', 'equalto', expense.payer_id) | first %}
+                            <div class="expense-item">
+                                <div class="expense-header">
+                                    <strong>{{ expense.description }}</strong>
+                                    <span class="expense-amount">${{ "%.2f" | format(expense.total_amount) }}</span>
+                                </div>
+                                <div class="expense-detail">
+                                    Paid by: <strong>{{ payer.name if payer else 'Unknown' }}</strong>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="empty-message">No expenses yet.</p>
+                {% endif %}
+                
+                <a href="{{ url_for('add_expense', group_id=group.id) }}" class="btn btn-secondary">
+                    ➕ Add Expense
+                </a>
+            </section>
+
+            <!-- Settlement Button -->
+            <section class="section">
+                <a href="{{ url_for('settle', group_id=group.id) }}" class="btn btn-success btn-large">
+                    🔍 Calculate Payments
+                </a>
+            </section>
+        </main>
+
+        <!-- Footer Navigation -->
+        <footer>
+            <a href="{{ url_for('index') }}" class="btn btn-outline">← Back to Groups</a>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>

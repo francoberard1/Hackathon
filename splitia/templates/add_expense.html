@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Expense - SplitIA</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>💰 {{ group.name }}</h1>
+            <p>Add a New Expense</p>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="breadcrumb">
+            <a href="{{ url_for('index') }}">Home</a> > 
+            <a href="{{ url_for('group_detail', group_id=group.id) }}">{{ group.name }}</a> > 
+            Add Expense
+        </nav>
+
+        <!-- Main Content -->
+        <main>
+            <section class="section form-section">
+                <form method="POST" class="form">
+                    <!-- Description Field -->
+                    <div class="form-group">
+                        <label for="description">What was the expense for?</label>
+                        <input 
+                            type="text" 
+                            id="description" 
+                            name="description" 
+                            placeholder="e.g., Dinner, Gas, Hotel"
+                            required
+                        >
+                    </div>
+
+                    <!-- Total Amount Field -->
+                    <div class="form-group">
+                        <label for="total_amount">Total Amount ($)</label>
+                        <input 
+                            type="number" 
+                            id="total_amount" 
+                            name="total_amount" 
+                            placeholder="0.00"
+                            step="0.01"
+                            min="0"
+                            required
+                        >
+                    </div>
+
+                    <!-- Payer Field -->
+                    <div class="form-group">
+                        <label for="payer_id">Who paid?</label>
+                        <select id="payer_id" name="payer_id" required>
+                            <option value="">-- Select payer --</option>
+                            {% for member in members %}
+                                <option value="{{ member.id }}">{{ member.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- Participants Field (Checkboxes) -->
+                    <div class="form-group">
+                        <label>Who should split this expense?</label>
+                        <div class="checkbox-group">
+                            {% for member in members %}
+                                <div class="checkbox-item">
+                                    <input 
+                                        type="checkbox" 
+                                        id="participant_{{ member.id }}" 
+                                        name="participant_{{ member.id }}"
+                                        value="on"
+                                    >
+                                    <label for="participant_{{ member.id }}">{{ member.name }}</label>
+                                </div>
+                            {% endfor %}
+                        </div>
+                        <small>Check each person who shares this cost (split equally)</small>
+                    </div>
+
+                    <!-- Buttons -->
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-success">Add Expense</button>
+                        <a href="{{ url_for('group_detail', group_id=group.id) }}" class="btn btn-outline">Cancel</a>
+                    </div>
+                </form>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settlement - SplitIA</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>💰 {{ group.name }}</h1>
+            <p>Settlement Summary</p>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="breadcrumb">
+            <a href="{{ url_for('index') }}">Home</a> > 
+            <a href="{{ url_for('group_detail', group_id=group.id) }}">{{ group.name }}</a> > 
+            Settlement
+        </nav>
+
+        <!-- Main Content -->
+        <main>
+            <!-- Balances Summary -->
+            <section class="section">
+                <h2>Current Balances</h2>
+                
+                <div class="balances-table">
+                    {% for member in members %}
+                        {% set balance = balances.get(member.id, 0) %}
+                        <div class="balance-row">
+                            <span class="balance-name">{{ member.name }}</span>
+                            {% if balance > 0.01 %}
+                                <span class="balance-positive">
+                                    ✅ Owed ${{ "%.2f" | format(balance) }}
+                                </span>
+                            {% elif balance < -0.01 %}
+                                <span class="balance-negative">
+                                    ⚠️ Owes ${{ "%.2f" | format(balance | abs) }}
+                                </span>
+                            {% else %}
+                                <span class="balance-settled">
+                                    ✔️ Settled
+                                </span>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            </section>
+
+            <!-- Transactions Section -->
+            <section class="section">
+                <h2>💳 Transactions Needed to Settle</h2>
+                
+                {% if transactions %}
+                    <div class="transactions-list">
+                        {% for transaction in transactions %}
+                            <div class="transaction-item">
+                                <div class="transaction-body">
+                                    <strong>{{ transaction.debtor_name }}</strong>
+                                    <span class="arrow">→ pays →</span>
+                                    <strong>{{ transaction.creditor_name }}</strong>
+                                </div>
+                                <div class="transaction-amount">
+                                    ${{ "%.2f" | format(transaction.amount) }}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                    
+                    <p class="info-message">
+                        ✅ After these {{ transactions | length }} transaction(s), all debts will be settled!
+                    </p>
+                {% else %}
+                    <p class="empty-message">
+                        ✔️ Everyone is settled! No transactions needed.
+                    </p>
+                {% endif %}
+            </section>
+
+            <!-- Action Buttons -->
+            <section class="section">
+                <div class="action-buttons">
+                    <a href="{{ url_for('group_detail', group_id=group.id) }}" class="btn btn-primary">
+                        ← Back to Group
+                    </a>
+                    <a href="{{ url_for('index') }}" class="btn btn-outline">
+                        Home
+                    </a>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>

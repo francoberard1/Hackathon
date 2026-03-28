@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SplitIA - Home</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>💰 SplitIA</h1>
+            <p>Smart Expense Splitter</p>
+        </header>
+
+        <!-- Main Content -->
+        <main>
+            <h2>Groups</h2>
+            
+            <!-- If no groups exist -->
+            {% if not groups %}
+                <p class="empty-message">No groups yet. Create one to get started!</p>
+            {% else %}
+                <!-- List of groups -->
+                <div class="groups-grid">
+                    {% for group in groups %}
+                        <div class="group-card">
+                            <h3>{{ group.name }}</h3>
+                            <p class="group-members">
+                                👥 {{ group.members | length }} 
+                                {% if group.members | length == 1 %}
+                                    member
+                                {% else %}
+                                    members
+                                {% endif %}
+                            </p>
+                            <a href="{{ url_for('group_detail', group_id=group.id) }}" class="btn btn-primary">
+                                View Group
+                            </a>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            <!-- Create Group Button -->
+            <div class="action-buttons">
+                <a href="{{ url_for('add_group') }}" class="btn btn-success">
+                    ➕ Create New Group
+                </a>
+            </div>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>

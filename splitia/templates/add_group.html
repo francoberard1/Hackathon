@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Group - SplitIA</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>💰 SplitIA</h1>
+            <p>Create a New Group</p>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="breadcrumb">
+            <a href="{{ url_for('index') }}">Home</a> > Create Group
+        </nav>
+
+        <!-- Main Content -->
+        <main>
+            <section class="section form-section">
+                <h2>New Group</h2>
+                
+                <form method="POST" class="form">
+                    <!-- Group Name Field -->
+                    <div class="form-group">
+                        <label for="group_name">Group Name</label>
+                        <input 
+                            type="text" 
+                            id="group_name" 
+                            name="group_name" 
+                            placeholder="e.g., Trip to Miami, Apartment, Project"
+                            required
+                            autofocus
+                        >
+                        <small>What's this group for?</small>
+                    </div>
+
+                    <!-- Buttons -->
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-success">Create Group</button>
+                        <a href="{{ url_for('index') }}" class="btn btn-outline">Cancel</a>
+                    </div>
+                </form>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>
