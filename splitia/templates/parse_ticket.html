@@ -50,9 +50,15 @@
             <section class="section form-section">
                 <h2>Paste your ticket text</h2>
                 <p style="margin-bottom: 20px; color: #666;">
-                    Paste the raw ticket text to test the text-first parser. You can also attach an image if you want,
-                    but the manual text input is the main path for this screen.
+                    Paste the raw ticket text or upload a ticket image. The parser will always end up using text,
+                    either written manually or extracted from the uploaded photo.
                 </p>
+
+                {% if error_message %}
+                    <div class="error-message" style="margin-bottom: 20px;">
+                        {{ error_message }}
+                    </div>
+                {% endif %}
 
                 <form method="POST" action="{{ form_action or '' }}" enctype="multipart/form-data" class="form">
                     <div class="form-group">
@@ -65,10 +71,9 @@ SUPERMARKET XYZ
 2x Water 5.00
 Bread 3.50
 Total 13.50"
-                            required
                             autofocus
                         >{{ ticket_text or '' }}</textarea>
-                        <small>Paste the OCR output or write the ticket content manually.</small>
+                        <small>Paste the OCR output or write the ticket content manually. Optional if you upload an image.</small>
                     </div>
 
                     <div class="form-group">
@@ -79,7 +84,7 @@ Total 13.50"
                             name="ticket_image"
                             accept="image/*"
                         >
-                        <small>Optional helper input for future OCR or demo flows. Not required to submit.</small>
+                        <small>Optional. If no manual text is provided, the backend will try OCR on this image.</small>
                     </div>
 
                     <div class="form-actions">

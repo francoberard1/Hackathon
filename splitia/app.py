@@ -26,6 +26,7 @@ from flask import Flask, render_template, request, redirect, url_for
 
 from logic import models
 from logic import settlement
+from logic.ticket_ocr import extract_text_from_image
 from logic.ticket_parser import parse_ticket_text
 
 
@@ -156,8 +157,29 @@ def register_routes(flask_app):
         POST: Parse text and show review screen
         """
         if request.method == 'POST':
-            ticket_text = request.form.get('ticket_text', '')
-            parsed_result = parse_ticket_text(ticket_text)
+            ticket_text = request.form.get('ticket_text', '').strip()
+            ticket_image = request.files.get('ticket_image')
+
+            if ticket_text:
+                raw_text = ticket_text
+            elif ticket_image and ticket_image.filename:
+                raw_text = extract_text_from_image(ticket_image)
+                if not raw_text:
+                    return render_template(
+                        'parse_ticket.html',
+                        form_action=url_for('parse_ticket'),
+                        ticket_text='',
+                        error_message='Could not read text from the uploaded image. Try another photo or paste the ticket text manually.'
+                    )
+            else:
+                return render_template(
+                    'parse_ticket.html',
+                    form_action=url_for('parse_ticket'),
+                    ticket_text='',
+                    error_message='Paste ticket text or upload a ticket image to continue.'
+                )
+
+            parsed_result = parse_ticket_text(raw_text)
 
             # Keep compatibility with templates that still read `total`.
             if 'total' not in parsed_result and 'total_detected' in parsed_result:
@@ -175,7 +197,8 @@ def register_routes(flask_app):
         return render_template(
             'parse_ticket.html',
             form_action=url_for('parse_ticket'),
-            ticket_text=''
+            ticket_text='',
+            error_message=''
         )
 
     @flask_app.route('/add_expense/<int:group_id>', methods=['GET', 'POST'])
