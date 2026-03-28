@@ -26,7 +26,11 @@ import unicodedata
 IGNORED_LINE_KEYWORDS = {
     "TOTAL",
     "SUBTOTAL",
+    "TOTALE",
+    "SUBTOTALE",
     "IVA",
+    "VAT",
+    "TAX",
     "DESCUENTO",
     "PROPINA",
     "CAMBIO",
@@ -34,8 +38,72 @@ IGNORED_LINE_KEYWORDS = {
     "EFECTIVO",
 }
 
+TOTAL_LINE_KEYWORDS = {
+    "TOTAL",
+    "TOTALE",
+    "AMOUNT",
+    "DUE",
+}
+
+SUBTOTAL_LINE_KEYWORDS = {
+    "SUBTOTAL",
+    "SUBTOTALE",
+}
+
+HEADER_LINE_KEYWORDS = {
+    "ADDRESS",
+    "AV",
+    "AVDA",
+    "AVENIDA",
+    "BAR",
+    "CALLE",
+    "CITY",
+    "CONTACT",
+    "CUIT",
+    "CIF",
+    "COUNTRY",
+    "DELIVERY",
+    "FAX",
+    "FISCAL",
+    "GUEST",
+    "GUESTS",
+    "HOSTERIA",
+    "HOTEL",
+    "INVOICE",
+    "LINEA",
+    "LLC",
+    "LOCAL",
+    "LTD",
+    "MESA",
+    "MOVIL",
+    "MOBILE",
+    "NIF",
+    "ORDER",
+    "OSPITE",
+    "PAGER",
+    "PHONE",
+    "PIZZERIA",
+    "RESTAURANT",
+    "RISTORANTE",
+    "ROAD",
+    "SA",
+    "SRL",
+    "SRLS",
+    "ST",
+    "STREET",
+    "TABLE",
+    "TAVOLO",
+    "TEL",
+    "TELEFONO",
+    "TICKET",
+    "VAT",
+    "VIA",
+}
+
 MIN_NAME_LENGTH = 2
 DEFAULT_CONFIDENCE = 0.72
+MAX_REASONABLE_PRICE = 99999.99
+MAX_DIGITS_WITHOUT_SEPARATORS = 5
 PRICE_TOKEN_RE = re.compile(r"(?<!\w)(?:[$€£]\s*)?\d[\d\.,]*")
 
 
@@ -74,6 +142,38 @@ def is_ignored_line(line: str) -> bool:
     return any(keyword in tokens for keyword in IGNORED_LINE_KEYWORDS)
 
 
+def has_long_numeric_sequence(line: str) -> bool:
+    """Return True when a line contains long digit runs typical of phone/tax ids."""
+    compact = re.sub(r"[^\d]", "", line)
+    return len(compact) > MAX_DIGITS_WITHOUT_SEPARATORS
+
+
+def has_metadata_keywords(line: str) -> bool:
+    """Return True for common business header/legal/contact lines across languages."""
+    upper_line = strip_accents(line).upper()
+    tokens = set(re.findall(r"[A-Z]+", upper_line))
+    return any(keyword in tokens for keyword in HEADER_LINE_KEYWORDS)
+
+
+def looks_like_address_or_contact_line(line: str) -> bool:
+    """Filter obvious address, website, contact, or tax-id style lines."""
+    upper_line = strip_accents(line).upper()
+
+    if "@" in line or "WWW." in upper_line or ".COM" in upper_line:
+        return True
+
+    if re.search(r"\b(?:NO|NRO|NUM|NUMBER)\b", upper_line) and has_long_numeric_sequence(line):
+        return True
+
+    if has_metadata_keywords(line):
+        return True
+
+    if re.search(r"\b[A-Z]{1,4}\s+\d{3,6}\b", upper_line):
+        return True
+
+    return False
+
+
 def has_price_candidate(line: str) -> bool:
     """Return True if the line contains at least one number-like token."""
     return bool(_find_price_matches(line))
@@ -97,6 +197,10 @@ def extract_candidate_lines(normalized_text: str) -> list[str]:
     candidates = []
     for line in normalized_text.split("\n"):
         if is_ignored_line(line):
+            continue
+        if looks_like_address_or_contact_line(line):
+            continue
+        if not has_reasonable_trailing_price(line):
             continue
         if not has_price_candidate(line):
             continue
@@ -159,6 +263,34 @@ def _parse_price_token(token: str) -> float | None:
         return None
 
 
+def has_reasonable_trailing_price(line: str) -> bool:
+    """
+    Keep lines whose last numeric token looks like a plausible item price.
+
+    This helps reject phones, tax ids, postal codes, and other long numbers
+    that OCR may place in otherwise parseable header lines.
+    """
+    matches = _find_price_matches(line)
+    if not matches:
+        return False
+
+    last_match = matches[-1]
+    trailing_text = line[last_match.end():].strip()
+    if trailing_text:
+        return False
+
+    price = _parse_price_token(last_match.group(0))
+    if price is None or price <= 0 or price > MAX_REASONABLE_PRICE:
+        return False
+
+    raw_digits = re.sub(r"[^\d]", "", last_match.group(0))
+    if len(raw_digits) > MAX_DIGITS_WITHOUT_SEPARATORS and "." not in last_match.group(0) and "," not in last_match.group(0):
+        return False
+
+    name_part = line[: last_match.start()].strip()
+    return looks_like_item_name(name_part)
+
+
 def _cleanup_item_name(name: str) -> str:
     """Remove noisy punctuation and collapse whitespace in an item name."""
     cleaned = re.sub(r"[-_=*#]+", " ", name)
@@ -212,9 +344,9 @@ def extract_total_detected(normalized_text: str) -> float | None:
         upper_line = strip_accents(line).upper()
         tokens = set(re.findall(r"[A-Z]+", upper_line))
 
-        if "TOTAL" not in tokens:
+        if not any(keyword in tokens for keyword in TOTAL_LINE_KEYWORDS):
             continue
-        if "SUBTOTAL" in tokens:
+        if any(keyword in tokens for keyword in SUBTOTAL_LINE_KEYWORDS):
             continue
 
         matches = _find_price_matches(line)
