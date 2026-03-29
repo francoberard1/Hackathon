@@ -437,7 +437,9 @@ def _resolve_participant_names(
             return explicit_participants
 
         if _mentions_equal_split(text):
-            if mentioned_members:
+            if _mentions_remainder_equal_split(text):
+                return group_members
+            if len(mentioned_members) > 1:
                 return mentioned_members
             return group_members
 
@@ -1207,6 +1209,8 @@ def _assemblyai_structured_parse_transcript(
         'Si hay monto total y participantes detectados pero no amounts individuales, repartí en partes iguales. '
         'Si el usuario dice "dividimos en partes iguales", incluí a todos los miembros reales del grupo y repartí el total entre todos. '
         'Si menciona un monto puntual para una persona y luego dice que el resto va en partes iguales, asigná ese monto puntual y repartí lo que sobra entre el resto de los miembros. '
+        'Si el usuario usa pronombres como "él", "a él", "el mismo" o "para él" después de decir quién pagó, interpretalos como referencia a esa misma persona. '
+        'Si solo se menciona al pagador pero después se dice "el resto lo dividimos en partes iguales", no dejes al pagador como único participante: asumí que participa todo el grupo salvo exclusiones explícitas. '
         'Salvo que la transcripción excluya a alguien de forma explícita, asumí que participa todo el grupo. '
         + group_context_line
         + narrator_context_line
