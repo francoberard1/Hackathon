@@ -9,10 +9,11 @@
 
 document.addEventListener('DOMContentLoaded', function() {
     const expenseForm = document.querySelector('form.form');
-    const participantCheckboxes = document.querySelectorAll('input[name^="participant_"]');
+    const participantCheckboxes = Array.from(document.querySelectorAll('input[name^="participant_"]'));
     const totalAmountInput = document.getElementById('total_amount');
-    const shareInputs = document.querySelectorAll('input[name^="share_amount_"]');
+    const shareInputs = Array.from(document.querySelectorAll('input[name^="share_amount_"]'));
     const shareSumHint = document.getElementById('draft-share-sum-hint');
+    const splitEquallyButton = document.getElementById('split-equally-btn');
 
     if (participantCheckboxes.length > 0 && expenseForm) {
         expenseForm.addEventListener('submit', function(event) {
@@ -24,17 +25,61 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    function getShareInputForCheckbox(checkbox) {
+        return document.getElementById('share_amount_' + checkbox.id.replace('participant_', ''));
+    }
+
+    function parseMoney(value) {
+        const parsed = Number(value || 0);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function markInputManual(input, isManual) {
+        if (!input) {
+            return;
+        }
+        input.dataset.manual = isManual ? 'true' : 'false';
+    }
+
+    function isInputManual(input) {
+        return Boolean(input) && input.dataset.manual === 'true';
+    }
+
+    function splitCents(totalAmount, count) {
+        if (!count) {
+            return [];
+        }
+
+        const totalCents = Math.round(totalAmount * 100);
+        const base = Math.floor(totalCents / count);
+        const remainder = totalCents - (base * count);
+        const shares = [];
+
+        for (let index = 0; index < count; index += 1) {
+            shares.push((base + (index < remainder ? 1 : 0)) / 100);
+        }
+
+        return shares;
+    }
+
+    function selectedCheckboxes() {
+        return participantCheckboxes.filter(function(checkbox) {
+            return checkbox.checked;
+        });
+    }
+
+    function selectedShareInputs() {
+        return selectedCheckboxes().map(getShareInputForCheckbox).filter(Boolean);
+    }
+
     function updateShareSumHint() {
         if (!shareSumHint || !totalAmountInput) {
             return;
         }
 
-        const totalAmount = Number(totalAmountInput.value || 0);
-        const selectedShares = Array.from(shareInputs).reduce(function(sum, input) {
-            if (input.disabled) {
-                return sum;
-            }
-            return sum + Number(input.value || 0);
+        const totalAmount = parseMoney(totalAmountInput.value);
+        const selectedShares = selectedShareInputs().reduce(function(sum, input) {
+            return sum + parseMoney(input.value);
         }, 0);
         const difference = Number((totalAmount - selectedShares).toFixed(2));
 
@@ -54,27 +99,92 @@ document.addEventListener('DOMContentLoaded', function() {
         shareSumHint.classList.add('assistant-error');
     }
 
+    function rebalanceAutomaticShares() {
+        if (!totalAmountInput) {
+            updateShareSumHint();
+            return;
+        }
+
+        const activeInputs = selectedShareInputs();
+        if (!activeInputs.length) {
+            updateShareSumHint();
+            return;
+        }
+
+        const totalAmount = parseMoney(totalAmountInput.value);
+        const manualInputs = activeInputs.filter(isInputManual);
+        const automaticInputs = activeInputs.filter(function(input) {
+            return !isInputManual(input);
+        });
+        const manualTotal = manualInputs.reduce(function(sum, input) {
+            return sum + parseMoney(input.value);
+        }, 0);
+        const remaining = Number((totalAmount - manualTotal).toFixed(2));
+
+        if (!automaticInputs.length) {
+            updateShareSumHint();
+            return;
+        }
+
+        const distributed = splitCents(Math.max(remaining, 0), automaticInputs.length);
+        automaticInputs.forEach(function(input, index) {
+            input.value = distributed[index].toFixed(2);
+        });
+
+        updateShareSumHint();
+    }
+
+    function selectAllAndSplitEqually() {
+        participantCheckboxes.forEach(function(checkbox) {
+            const shareInput = getShareInputForCheckbox(checkbox);
+            checkbox.checked = true;
+            if (shareInput) {
+                shareInput.disabled = false;
+                markInputManual(shareInput, false);
+            }
+        });
+        rebalanceAutomaticShares();
+    }
+
     participantCheckboxes.forEach(function(checkbox) {
         checkbox.addEventListener('change', function() {
-            const shareInput = document.getElementById('share_amount_' + checkbox.id.replace('participant_', ''));
+            const shareInput = getShareInputForCheckbox(checkbox);
             if (!shareInput) {
                 return;
             }
+
             shareInput.disabled = !checkbox.checked;
             if (!checkbox.checked) {
                 shareInput.value = '';
+                markInputManual(shareInput, false);
+            } else if (!isInputManual(shareInput)) {
+                markInputManual(shareInput, false);
             }
-            updateShareSumHint();
+
+            rebalanceAutomaticShares();
         });
     });
 
     shareInputs.forEach(function(input) {
-        input.addEventListener('input', updateShareSumHint);
+        input.addEventListener('input', function() {
+            markInputManual(input, true);
+            rebalanceAutomaticShares();
+        });
     });
 
     if (totalAmountInput) {
-        totalAmountInput.addEventListener('input', updateShareSumHint);
+        totalAmountInput.addEventListener('input', rebalanceAutomaticShares);
     }
+
+    if (splitEquallyButton) {
+        splitEquallyButton.addEventListener('click', selectAllAndSplitEqually);
+    }
+
+    shareInputs.forEach(function(input) {
+        markInputManual(input, Boolean(input.value && !input.disabled));
+    });
+
+    rebalanceAutomaticShares();
 });
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -320,6 +430,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (shareInput) {
                     shareInput.disabled = !isSelected;
                     shareInput.value = isSelected ? participantMap[checkboxName].toFixed(2) : '';
+                    shareInput.dataset.manual = isSelected ? 'true' : 'false';
                 }
             });
 
@@ -340,6 +451,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 shareSumHint.textContent = 'Montos sugeridos por persona: $' + sum.toFixed(2);
                 shareSumHint.classList.remove('assistant-error');
             }
+        }
+
+        if (totalAmountInput) {
+            totalAmountInput.dispatchEvent(new Event('input', { bubbles: true }));
         }
     }
 

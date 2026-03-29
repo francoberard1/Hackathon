@@ -163,6 +163,11 @@
                     <!-- Participants Field (Checkboxes) -->
                     <div class="form-group">
                         <label>Who should split this expense?</label>
+                        <div class="split-controls">
+                            <button type="button" id="split-equally-btn" class="btn btn-outline btn-small">
+                                Split equally
+                            </button>
+                        </div>
                         <div class="split-members-list">
                             {% for member in members %}
                                 <div class="split-member-row" data-member-id="{{ member.id }}">

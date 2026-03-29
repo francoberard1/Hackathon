@@ -531,6 +531,11 @@ section.section h2 {
     margin-top: 10px;
 }
 
+.split-controls {
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
+
 .split-member-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 140px;
@@ -595,6 +600,11 @@ section.section h2 {
 .group-card .btn {
     margin-right: 8px;
     margin-top: 8px;
+}
+
+.group-card .btn-danger {
+    padding: 8px 12px;
+    font-size: 0.85rem;
 }
 
 .group-members {
@@ -713,6 +723,11 @@ section.section h2 {
 
 .inline-action-form {
     display: inline-block;
+}
+
+.btn-small {
+    padding: 8px 12px;
+    font-size: 0.85rem;
 }
 
 .btn-danger {
