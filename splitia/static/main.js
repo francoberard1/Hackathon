@@ -139,6 +139,22 @@ document.addEventListener('DOMContentLoaded', function() {
     let recordingIntervalId = null;
     let recordingStartedAt = null;
 
+    function getCurrentGroupMembers() {
+        return Array.from(document.querySelectorAll('.split-member-row label')).map(function(label) {
+            return (label.textContent || '').trim();
+        }).filter(Boolean);
+    }
+
+    function getCurrentNarratorHint() {
+        const payerSelect = document.getElementById('payer_id');
+        if (!payerSelect || !payerSelect.value) {
+            return '';
+        }
+
+        const selectedOption = payerSelect.options[payerSelect.selectedIndex];
+        return selectedOption ? selectedOption.text.trim() : '';
+    }
+
     function getRecordingFormat() {
         if (!window.MediaRecorder || typeof window.MediaRecorder.isTypeSupported !== 'function') {
             return { mimeType: '', extension: 'webm' };
@@ -248,6 +264,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const descriptionInput = document.getElementById('description');
         const totalAmountInput = document.getElementById('total_amount');
         const payerSelect = document.getElementById('payer_id');
+        const expenseDateInput = document.getElementById('expense_date');
         const participantCheckboxes = document.querySelectorAll('input[name^="participant_"]');
         const totalHint = document.getElementById('draft-total-hint');
         const payerHint = document.getElementById('draft-payer-hint');
@@ -261,8 +278,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (totalAmountInput && typeof draft.total_amount === 'number') {
             totalAmountInput.value = draft.total_amount;
             if (totalHint) {
-                totalHint.textContent = 'Draft currency: ' + (draft.currency || 'ARS');
+                totalHint.textContent = 'Draft currency: ' + (draft.currency || 'ARS') + (draft.expense_date ? ' | Fecha detectada: ' + draft.expense_date : '');
             }
+        }
+
+        if (expenseDateInput && draft.expense_date) {
+            expenseDateInput.value = draft.expense_date;
         }
 
         if (payerSelect && draft.payer_name) {
@@ -345,7 +366,11 @@ document.addEventListener('DOMContentLoaded', function() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ transcript: transcript })
+            body: JSON.stringify({
+                transcript: transcript,
+                group_members: getCurrentGroupMembers(),
+                narrator_name: getCurrentNarratorHint()
+            })
         });
 
         const payload = await response.json();

@@ -15,6 +15,7 @@ class ExpenseDraft(BaseModel):
     total_amount: float = Field(default=0)
     currency: str = Field(default='ARS')
     payer_name: str
+    expense_date: str = Field(default='')
     participants: list[ExpenseParticipantDraft] = Field(default_factory=list)
     tip_amount: float = Field(default=0)
     notes: str = Field(default='')

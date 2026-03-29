@@ -37,6 +37,17 @@ def _has_ai_parser():
     )
 
 
+def _parse_request_group_members(payload, form_data):
+    raw_members = payload.get('group_members') if isinstance(payload, dict) else None
+    if raw_members is None:
+        raw_members = form_data.getlist('group_members')
+
+    if not isinstance(raw_members, list):
+        return []
+
+    return [str(member).strip() for member in raw_members if str(member).strip()]
+
+
 def create_app():
     """
     Application factory used by:
@@ -360,6 +371,8 @@ def register_routes(flask_app):
         """
         payload = request.get_json(silent=True) or {}
         explanation_text = (payload.get('text') or request.form.get('text') or '').strip()
+        group_members = _parse_request_group_members(payload, request.form)
+        narrator_name = (payload.get('narrator_name') or request.form.get('narrator_name') or '').strip() or None
 
         if not explanation_text:
             return jsonify({'error': 'text is required'}), 400
@@ -368,6 +381,8 @@ def register_routes(flask_app):
             explanation_text,
             transcription_used_ai=_has_ai_parser(),
             transcription_source='manual',
+            group_members=group_members,
+            narrator_name=narrator_name,
         )
         return jsonify(draft.model_dump()), 200
 
@@ -380,6 +395,8 @@ def register_routes(flask_app):
         """
         payload = request.get_json(silent=True) or {}
         transcript = (payload.get('transcript') or request.form.get('transcript') or '').strip()
+        group_members = _parse_request_group_members(payload, request.form)
+        narrator_name = (payload.get('narrator_name') or request.form.get('narrator_name') or '').strip() or None
 
         if not transcript:
             return jsonify({'error': 'transcript is required'}), 400
@@ -388,6 +405,8 @@ def register_routes(flask_app):
             transcript,
             transcription_used_ai=_has_ai_parser(),
             transcription_source='edited-transcript',
+            group_members=group_members,
+            narrator_name=narrator_name,
         )
         return jsonify(draft.model_dump()), 200
 

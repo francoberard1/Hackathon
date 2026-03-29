@@ -2,6 +2,7 @@ import json
 import os
 import re
 import ssl
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -27,6 +28,11 @@ try:
 except ImportError:  # pragma: no cover - depends on environment
     certifi = None
 
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover - depends on environment
+    ZoneInfo = None
+
 from .schemas import ExpenseDraft, ExpenseParticipantDraft
 
 load_dotenv()
@@ -35,6 +41,23 @@ _AUDIO_EXTS = {'.mp3', '.wav', '.m4a', '.ogg', '.webm'}
 _DEFAULT_TRANSCRIPT = 'Cena total 24000 pesos, pague yo, participaron Juan y Sofi.'
 _DEFAULT_TRANSCRIPTION_MODEL = os.getenv('OPENAI_AUDIO_MODEL', 'gpt-4o-transcribe')
 _DEFAULT_PARSER_MODEL = os.getenv('ASSEMBLYAI_LLM_MODEL', 'gemini-2.5-flash-lite')
+_AMOUNT_FRAGMENT = r'(\d[\d.,]*(?:\s*(?:mil|mil pesos|mil ars|lucas|luca))?)'
+_DEFAULT_TIMEZONE = os.getenv('APP_TIMEZONE', 'America/Argentina/Buenos_Aires')
+_SPANISH_MONTHS = {
+    'enero': 1,
+    'febrero': 2,
+    'marzo': 3,
+    'abril': 4,
+    'mayo': 5,
+    'junio': 6,
+    'julio': 7,
+    'agosto': 8,
+    'septiembre': 9,
+    'setiembre': 9,
+    'octubre': 10,
+    'noviembre': 11,
+    'diciembre': 12,
+}
 
 
 def _get_assemblyai_key() -> str:
@@ -149,6 +172,295 @@ def _normalize_name(name: str) -> str:
     return ' '.join(piece.capitalize() for piece in clean_name.split())
 
 
+def _normalize_group_members(group_members: list[str] | None) -> list[str]:
+    if not isinstance(group_members, list):
+        return []
+
+    normalized = []
+    seen = set()
+    for member in group_members:
+        clean_member = _normalize_name(str(member or ''))
+        if not clean_member:
+            continue
+        member_key = clean_member.lower()
+        if member_key in seen:
+            continue
+        seen.add(member_key)
+        normalized.append(clean_member)
+
+    return normalized
+
+
+def _parse_amount_phrase(raw_value: str | None) -> float:
+    if not raw_value:
+        return 0.0
+
+    normalized = _normalize_whitespace(str(raw_value).lower())
+    if any(token in normalized for token in [' mil', 'mil ', 'luca', 'lucas']):
+        spoken_amount = _parse_spoken_amount(normalized)
+        if spoken_amount > 0:
+            return spoken_amount
+
+    return _parse_number(normalized)
+
+
+def _split_amount_evenly(total_amount: float, count: int) -> list[float]:
+    if count <= 0:
+        return []
+
+    total_cents = int(round(total_amount * 100))
+    base_share = total_cents // count
+    remainder = total_cents - (base_share * count)
+
+    shares = []
+    for index in range(count):
+        cents = base_share + (1 if index < remainder else 0)
+        shares.append(round(cents / 100, 2))
+
+    return shares
+
+
+def _mentions_equal_split(text: str) -> bool:
+    patterns = [
+        r'partes iguales',
+        r'divid(?:imos|ieron)\s+igual',
+        r'divid(?:imos|ieron)\s+en\s+partes\s+iguales',
+        r'entre\s+todos',
+        r'a medias',
+        r'mitad y mitad',
+        r'todos\s+pagamos\s+lo mismo',
+        r'todos\s+deben\s+lo mismo',
+        r'en partes iguales',
+    ]
+    return any(re.search(pattern, text) for pattern in patterns)
+
+
+def _mentions_all_group(text: str) -> bool:
+    return bool(
+        re.search(r'\btodos\b', text)
+        or re.search(r'fuimos\s+todos', text)
+        or re.search(r'estabamos\s+todos', text)
+        or re.search(r'estábamos\s+todos', text)
+    )
+
+
+def _mentions_remainder_equal_split(text: str) -> bool:
+    return bool(
+        re.search(r'resto\s+(?:lo\s+)?divid(?:imos|ieron)?\s+en\s+partes\s+iguales', text)
+        or re.search(r'resto\s+(?:en|a)\s+partes\s+iguales', text)
+        or re.search(r'lo\s+que\s+queda\s+(?:en|a)\s+partes\s+iguales', text)
+    )
+
+
+def _extract_explicit_participant_names(text: str, group_members: list[str]) -> list[str]:
+    patterns = [
+        r'(?:particip(?:an|amos|aron)|entre|dividido entre|split entre|eramos|éramos)\s+(.+?)(?:\.| total| pago| pagó|$)',
+        r'fuimos\s+(.+?)(?:,|\.| y gast| gast| pag| total|$)',
+    ]
+    best_mentioned = []
+
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+
+        mentioned = _find_group_member_mentions(match.group(1), group_members)
+        if len(mentioned) > len(best_mentioned):
+            best_mentioned = mentioned
+
+    pre_payment_segment = re.split(r'\b(?:pag(?:o|ó)|salio|salió|total|gast(?:amos|e|é|aron))\b', text, maxsplit=1)[0]
+    mentioned_before_payment = _find_group_member_mentions(pre_payment_segment, group_members)
+    if len(mentioned_before_payment) > len(best_mentioned):
+        best_mentioned = mentioned_before_payment
+
+    return best_mentioned
+
+
+def _find_group_member_mentions(text: str, group_members: list[str]) -> list[str]:
+    mentioned = []
+    normalized_text = f' {text.lower()} '
+
+    for member in group_members:
+        member_tokens = [re.escape(token.lower()) for token in member.split() if token]
+        if not member_tokens:
+            continue
+
+        full_name_pattern = r'\b' + r'\s+'.join(member_tokens) + r'\b'
+        first_name_pattern = r'\b' + member_tokens[0] + r'\b'
+
+        if re.search(full_name_pattern, normalized_text) or re.search(first_name_pattern, normalized_text):
+            mentioned.append(member)
+
+    return mentioned
+
+
+def _extract_member_amounts(text: str, group_members: list[str], payer_name: str = 'Unknown') -> dict[str, float]:
+    explicit_amounts = {}
+    normalized_text = text.lower()
+
+    for member in group_members:
+        member_patterns = [
+            rf'\b{re.escape(member.lower())}\b[^.\n,;:]*?(?:debe|deberia|debería|comio|comió|consumio|consumió|gasto|gastó|por)\s*(?:unos?\s*)?{_AMOUNT_FRAGMENT}(?:\s+de\s+gasto)?',
+            rf'\ba\s+{re.escape(member.lower())}\b[^.\n,;:]*?(?:le\s+toca|le\s+tocan|le\s+corresponde|le\s+corresponden|le\s+quedo|le\s+quedó)\s*(?:un\s+gasto\s+de\s*|unos?\s*)?{_AMOUNT_FRAGMENT}(?:\s+de\s+gasto)?',
+            rf'\b{re.escape(member.lower())}\b[^.\n,;:]*?(?:le\s+toca|le\s+tocan|le\s+corresponde|le\s+corresponden)\s*(?:un\s+gasto\s+de\s*|unos?\s*)?{_AMOUNT_FRAGMENT}(?:\s+de\s+gasto)?',
+        ]
+
+        for pattern in member_patterns:
+            match = re.search(pattern, normalized_text)
+            if not match:
+                continue
+
+            amount = _parse_amount_phrase(match.group(1))
+            if amount > 0:
+                explicit_amounts[member] = amount
+                break
+
+    if payer_name and payer_name != 'Unknown' and payer_name in group_members and payer_name not in explicit_amounts:
+        pronoun_patterns = [
+            rf'\ba\s+(?:el|él)\b[^.\n,;:]*?(?:le\s+corresponde|le\s+corresponden|le\s+toca|le\s+tocan|le\s+quedo|le\s+quedó|debe|gasto|gastó|comio|comió)\s*(?:un\s+gasto\s+de\s*|unos?\s*)?{_AMOUNT_FRAGMENT}(?:\s+de\s+gasto)?',
+            rf'\b(?:el|él)\b[^.\n,;:]*?(?:debe|gasto|gastó|comio|comió|pagó|puso)\s*(?:unos?\s*)?{_AMOUNT_FRAGMENT}',
+            rf'\b(?:el|él)\b[^.\n,;:]*?(?:tuvo|tiene)\s+(?:un\s+gasto\s+de\s*|unos?\s*)?{_AMOUNT_FRAGMENT}(?:\s+de\s+gasto)?',
+            rf'\b(?:tuvo|tiene)\s+un\s+gasto\s+de\s*{_AMOUNT_FRAGMENT}(?:\s+de\s+gasto)?',
+        ]
+
+        for pattern in pronoun_patterns:
+            match = re.search(pattern, normalized_text)
+            if not match:
+                continue
+
+            amount = _parse_amount_phrase(match.group(1))
+            if amount > 0:
+                explicit_amounts[payer_name] = amount
+                break
+
+    return explicit_amounts
+
+
+def _resolve_narrator_member(
+    text: str,
+    group_members: list[str],
+    mentioned_members: list[str],
+    narrator_name: str | None = None,
+) -> str | None:
+    yo_patterns = [
+        r'\byo pag(?:ue|ué)\b',
+        r'\blo pag(?:ue|ué) yo\b',
+        r'\bpagu(?:e|é) yo\b',
+        r'\byo puse\b',
+        r'\byo invite\b',
+        r'\byo invité\b',
+    ]
+    if not any(re.search(pattern, text) for pattern in yo_patterns):
+        return None
+
+    normalized_narrator = _normalize_name(narrator_name or '')
+    if normalized_narrator and normalized_narrator in group_members:
+        return normalized_narrator
+
+    missing_members = [member for member in group_members if member not in mentioned_members]
+    if len(missing_members) == 1:
+        return missing_members[0]
+
+    return None
+
+
+def _resolve_payer_name(
+    text: str,
+    group_members: list[str],
+    narrator_name: str | None = None,
+) -> str:
+    mentioned_members = _find_group_member_mentions(text, group_members)
+    narrator_member = _resolve_narrator_member(text, group_members, mentioned_members, narrator_name=narrator_name)
+    if narrator_member:
+        return narrator_member
+
+    extracted_payer = _extract_payer_name(text)
+    if extracted_payer != 'Unknown':
+        normalized_extracted = _normalize_name(extracted_payer)
+        for member in group_members:
+            if member.lower() == normalized_extracted.lower():
+                return member
+        return normalized_extracted
+
+    return 'Unknown'
+
+
+def _resolve_participant_names(
+    text: str,
+    group_members: list[str],
+    payer_name: str,
+) -> list[str]:
+    explicit_participants = _extract_explicit_participant_names(text, group_members)
+    mentioned_members = _find_group_member_mentions(text, group_members)
+
+    if group_members:
+        if _mentions_all_group(text):
+            return group_members
+
+        if explicit_participants:
+            return explicit_participants
+
+        if _mentions_equal_split(text):
+            if mentioned_members:
+                return mentioned_members
+            return group_members
+
+        if mentioned_members:
+            return mentioned_members
+
+        return group_members
+
+    if explicit_participants:
+        return explicit_participants
+
+    return [payer_name] if payer_name and payer_name != 'Unknown' else []
+
+
+def _build_participants_from_context(
+    text: str,
+    total_amount: float,
+    group_members: list[str],
+    payer_name: str,
+) -> list[ExpenseParticipantDraft]:
+    participant_names = _resolve_participant_names(text, group_members, payer_name)
+    if not participant_names:
+        return []
+
+    explicit_amounts = _extract_member_amounts(text, participant_names, payer_name=payer_name)
+    if not explicit_amounts:
+        return _build_participants(participant_names, total_amount)
+
+    remaining_names = [name for name in participant_names if name not in explicit_amounts]
+    explicit_total = round(sum(explicit_amounts.values()), 2)
+    remaining_total = round(max(total_amount - explicit_total, 0.0), 2)
+
+    participant_amounts = {name: explicit_amounts.get(name, 0.0) for name in participant_names}
+
+    if remaining_names:
+        should_split_remaining = (
+            _mentions_remainder_equal_split(text)
+            or _mentions_equal_split(text)
+            or True
+        )
+        if should_split_remaining:
+            split_amounts = _split_amount_evenly(remaining_total, len(remaining_names))
+            for index, name in enumerate(remaining_names):
+                participant_amounts[name] = split_amounts[index]
+
+    participants = [
+        ExpenseParticipantDraft(name=name, amount=round(participant_amounts.get(name, 0.0), 2))
+        for name in participant_names
+    ]
+
+    if total_amount > 0:
+        normalized_total = round(sum(participant.amount for participant in participants), 2)
+        difference = round(total_amount - normalized_total, 2)
+        if participants and abs(difference) > 0.01:
+            participants[-1].amount = round(participants[-1].amount + difference, 2)
+
+    return participants
+
+
 def _safe_json_loads(raw_content: str) -> dict:
     if not raw_content:
         return {}
@@ -177,6 +489,7 @@ def _expense_draft_json_schema() -> dict:
                 'total_amount': {'type': 'number'},
                 'currency': {'type': 'string'},
                 'payer_name': {'type': 'string'},
+                'expense_date': {'type': 'string'},
                 'participants': {
                     'type': 'array',
                     'items': {
@@ -199,6 +512,7 @@ def _expense_draft_json_schema() -> dict:
                 'total_amount',
                 'currency',
                 'payer_name',
+                'expense_date',
                 'participants',
                 'tip_amount',
                 'notes',
@@ -216,13 +530,36 @@ def _build_ssl_context():
     return ssl.create_default_context(cafile=certifi.where())
 
 
-def _guess_description(text: str) -> str:
+def _guess_description(text: str, group_members: list[str] | None = None) -> str:
+    normalized_group_members = _normalize_group_members(group_members)
+
+    def clean_candidate(raw_candidate: str) -> str:
+        candidate = _normalize_whitespace(raw_candidate)
+        candidate = re.sub(r'^(?:fueron|fue|eran|era)\s+', '', candidate, flags=re.IGNORECASE)
+        for member in normalized_group_members:
+            candidate = re.sub(rf'(?:\s+|,)+{re.escape(member.lower())}\b', '', candidate.lower(), flags=re.IGNORECASE)
+        candidate = _normalize_whitespace(candidate)
+        return candidate
+
+    specific_patterns = [
+        r'fuimos a comer\s+([a-záéíóúñ ]+?)(?:,|\.| y | en total| nos sali|$)',
+        r'comimos\s+([a-záéíóúñ ]+?)(?:,|\.| y | en total| nos sali|$)',
+        r'lo que comimos\s+([a-záéíóúñ ]+?)(?:,|\.| y | en total| nos sali|$)',
+        r'fuimos a\s+([a-záéíóúñ ]+?)(?:,|\.| y | en total| nos sali|$)',
+    ]
+    for pattern in specific_patterns:
+        match = re.search(pattern, text)
+        if match:
+            candidate = clean_candidate(match.group(1))
+            if candidate and not re.search(r'\d', candidate):
+                return candidate.capitalize()
+
     match = re.search(
         r'(?:por|de|fue|era|compramos|compre|compré|cena|almuerzo|desayuno)\s+([a-záéíóúñ ]+?)(?:,|\.| total| pago| pagó| participaron|$)',
         text
     )
     if match:
-        candidate = _normalize_whitespace(match.group(1))
+        candidate = clean_candidate(match.group(1))
         if candidate and not re.search(r'\d', candidate):
             return candidate.capitalize()
 
@@ -233,6 +570,63 @@ def _guess_description(text: str) -> str:
     return 'Expense from chat'
 
 
+def _safe_iso_date(year: int, month: int, day: int) -> str:
+    try:
+        return date(year, month, day).isoformat()
+    except ValueError:
+        return ''
+
+
+def _today_local() -> date:
+    if ZoneInfo is not None:
+        try:
+            return datetime.now(ZoneInfo(_DEFAULT_TIMEZONE)).date()
+        except Exception:
+            pass
+    return date.today()
+
+
+def _extract_expense_date(text: str) -> str:
+    today = _today_local()
+
+    if re.search(r'\bhoy\b', text):
+        return today.isoformat()
+
+    if re.search(r'\bayer\b', text):
+        return (today - timedelta(days=1)).isoformat()
+
+    if re.search(r'\banteayer\b', text):
+        return (today - timedelta(days=2)).isoformat()
+
+    numeric_match = re.search(r'\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b', text)
+    if numeric_match:
+        day_value = int(numeric_match.group(1))
+        month_value = int(numeric_match.group(2))
+        year_value = numeric_match.group(3)
+        if year_value:
+            parsed_year = int(year_value)
+            if parsed_year < 100:
+                parsed_year += 2000
+        else:
+            parsed_year = today.year
+        iso_value = _safe_iso_date(parsed_year, month_value, day_value)
+        if iso_value:
+            return iso_value
+
+    textual_match = re.search(r'\b(\d{1,2})\s+de\s+([a-záéíóú]+)(?:\s+de\s+(\d{4}))?\b', text)
+    if textual_match:
+        day_value = int(textual_match.group(1))
+        month_name = textual_match.group(2).lower()
+        month_value = _SPANISH_MONTHS.get(month_name)
+        if month_value:
+            year_value = int(textual_match.group(3)) if textual_match.group(3) else today.year
+            iso_value = _safe_iso_date(year_value, month_value, day_value)
+            if iso_value:
+                return iso_value
+
+    return ''
+
+
 def _extract_total(text: str) -> float:
     spoken_amount = _parse_spoken_amount(text)
     if spoken_amount > 0:
@@ -240,6 +634,7 @@ def _extract_total(text: str) -> float:
 
     patterns = [
         r'(?:total|importe|monto|salio|salió|fue)\s*(?:de\s*)?(\d[\d.,]*)',
+        r'(?:gast(?:amos|e|é|aste|aron)|salimos)\s*(?:de\s*)?(\d[\d.,]*)',
         r'(\d[\d.,]*)\s*(?:pesos argentinos|pesos|ars|usd|dolares|dólares)',
         r'(?:pague|pagué|pago|pagó|abon(?:e|é|o|ó))\s*(?:yo\s*)?(\d[\d.,]*)',
         r'\b(\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?)\b',
@@ -271,12 +666,25 @@ def _extract_payer_name(text: str) -> str:
     if any(re.search(pattern, text) for pattern in yo_patterns):
         return 'Yo'
 
+    leading_name_match = re.search(
+        r'([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+)?)\s+(?:pag(?:o|ó)|pagaron|paga|abon(?:o|ó)|puso)\b',
+        text
+    )
+    if leading_name_match:
+        candidate = _normalize_name(leading_name_match.group(1))
+        candidate = re.sub(r'^(Y|E)\s+', '', candidate)
+        candidate = re.sub(r'\s+(Y|E|Salio|Salió)$', '', candidate)
+        return candidate or 'Unknown'
+
     match = re.search(
         r'(?:pag(?:o|ó)|pagaron|paga|abon(?:o|ó)|puso)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+)?)',
         text
     )
     if match:
-        return _normalize_name(match.group(1))
+        candidate = _normalize_name(match.group(1))
+        candidate = re.sub(r'^(Y|E)\s+', '', candidate)
+        candidate = re.sub(r'\s+(Y|E)$', '', candidate)
+        return candidate or 'Unknown'
 
     return 'Unknown'
 
@@ -341,15 +749,28 @@ def _fallback_parse_transcript(
     transcript: str,
     transcription_used_ai: bool = False,
     transcription_source: str = 'demo',
+    group_members: list[str] | None = None,
+    narrator_name: str | None = None,
 ) -> ExpenseDraft:
     normalized_text = transcript.lower().strip()
+    normalized_group_members = _normalize_group_members(group_members)
     total_amount = _extract_total(normalized_text)
-    payer_name = _extract_payer_name(normalized_text)
-    participants = _build_participants(
+    payer_name = _resolve_payer_name(
+        normalized_text,
+        normalized_group_members,
+        narrator_name=narrator_name,
+    ) if normalized_group_members else _extract_payer_name(normalized_text)
+    participants = _build_participants_from_context(
+        normalized_text,
+        total_amount,
+        normalized_group_members,
+        payer_name,
+    ) if normalized_group_members else _build_participants(
         _extract_participant_names(normalized_text, payer_name),
         total_amount,
     )
     tip_amount = _extract_tip_amount(normalized_text)
+    expense_date = _extract_expense_date(normalized_text)
 
     confidence = 0.3
     if total_amount > 0:
@@ -362,15 +783,17 @@ def _fallback_parse_transcript(
         confidence += 0.05
 
     return ExpenseDraft(
-        description=_guess_description(normalized_text),
+        description=_guess_description(normalized_text, group_members=normalized_group_members),
         total_amount=total_amount,
         currency=_extract_currency(normalized_text),
         payer_name=payer_name,
+        expense_date=expense_date,
         participants=participants,
         tip_amount=tip_amount,
         notes=(
             'parser=fallback; transcription='
             + transcription_source
+            + ('; group_context=' + ', '.join(normalized_group_members) if normalized_group_members else '')
             + f'; transcript="{transcript}"'
         ),
         confidence=min(round(confidence, 2), 0.8),
@@ -391,9 +814,10 @@ def _normalize_structured_draft(
         currency = 'ARS'
 
     payer_name = _normalize_name(str(candidate.get('payer_name') or 'Unknown')) or 'Unknown'
+    expense_date = _normalize_whitespace(str(candidate.get('expense_date') or ''))
     participants = _normalize_participants(candidate.get('participants') or [], total_amount)
     tip_amount = _parse_number(candidate.get('tip_amount'))
-    description = _normalize_whitespace(str(candidate.get('description') or '')) or _guess_description(transcript.lower())
+    description = _normalize_whitespace(str(candidate.get('description') or '')) or _guess_description(transcript.lower(), group_members=None)
     notes = _normalize_whitespace(str(candidate.get('notes') or ''))
     confidence = candidate.get('confidence')
 
@@ -407,6 +831,7 @@ def _normalize_structured_draft(
         total_amount=total_amount,
         currency=currency,
         payer_name=payer_name,
+        expense_date=expense_date or _extract_expense_date(transcript.lower()),
         participants=participants,
         tip_amount=tip_amount,
         notes=(
@@ -427,9 +852,23 @@ def _assemblyai_structured_parse_transcript(
     transcript: str,
     transcription_used_ai: bool = False,
     transcription_source: str = 'manual',
+    group_members: list[str] | None = None,
+    narrator_name: str | None = None,
 ) -> ExpenseDraft | None:
     if not _has_assemblyai():
         return None
+
+    normalized_group_members = _normalize_group_members(group_members)
+    group_context_line = (
+        'Miembros reales del grupo: ' + ', '.join(normalized_group_members) + '. '
+        if normalized_group_members else
+        ''
+    )
+    narrator_context_line = (
+        'Si la transcripción usa "yo", interpretalo como ' + narrator_name + '. '
+        if narrator_name else
+        ''
+    )
 
     prompt = (
         'Extrae un borrador de gasto estructurado a partir de una transcripcion en español. '
@@ -437,7 +876,12 @@ def _assemblyai_structured_parse_transcript(
         'Asumí ARS salvo que la transcripción indique claramente USD. '
         'needs_review debe ser true. '
         'Si hay monto total y participantes detectados pero no amounts individuales, repartí en partes iguales. '
-        'confidence debe ser un número entre 0 y 1.'
+        'Si el usuario dice "dividimos en partes iguales", incluí a todos los miembros reales del grupo y repartí el total entre todos. '
+        'Si menciona un monto puntual para una persona y luego dice que el resto va en partes iguales, asigná ese monto puntual y repartí lo que sobra entre el resto de los miembros. '
+        'Salvo que la transcripción excluya a alguien de forma explícita, asumí que participa todo el grupo. '
+        + group_context_line
+        + narrator_context_line
+        + 'confidence debe ser un número entre 0 y 1.'
     )
 
     payload = {
@@ -548,12 +992,16 @@ def parse_transcript(
     transcript: str,
     transcription_used_ai: bool = False,
     transcription_source: str = 'manual',
+    group_members: list[str] | None = None,
+    narrator_name: str | None = None,
 ) -> ExpenseDraft:
     normalized_transcript = _normalize_whitespace(transcript)
     structured_draft = _assemblyai_structured_parse_transcript(
         normalized_transcript,
         transcription_used_ai=transcription_used_ai,
         transcription_source=transcription_source,
+        group_members=group_members,
+        narrator_name=narrator_name,
     )
     if structured_draft is not None:
         return structured_draft
@@ -562,6 +1010,8 @@ def parse_transcript(
         normalized_transcript,
         transcription_used_ai=transcription_used_ai,
         transcription_source=transcription_source,
+        group_members=group_members,
+        narrator_name=narrator_name,
     )
 
 
