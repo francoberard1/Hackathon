@@ -16,6 +16,7 @@
 import os
 import tempfile
 from pathlib import Path
+from datetime import date
 
 try:
     from dotenv import load_dotenv
@@ -78,6 +79,26 @@ def _parse_request_group_members(payload, form_data):
     return [str(member).strip() for member in raw_members if str(member).strip()]
 
 
+def _parse_request_ticket_items(payload, form_data):
+    raw_items = payload.get('ticket_items') if isinstance(payload, dict) else None
+    if raw_items is None:
+        raw_items = []
+
+    if not isinstance(raw_items, list):
+        return []
+
+    normalized_items = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        normalized_items.append({
+            'name': str(item.get('name') or '').strip(),
+            'amount': item.get('amount') or 0,
+        })
+
+    return normalized_items
+
+
 def _default_receipt_review_state():
     return {
         'description': '',
@@ -90,7 +111,7 @@ def _default_receipt_review_state():
         'confidence': '',
         'notes': '',
         'payer_id': '',
-        'expense_date': '',
+        'expense_date': date.today().isoformat(),
         'selected_tax_participants': [],
         'selected_tip_participants': [],
         'items': [],
@@ -121,6 +142,7 @@ def _expense_form_context(
         'error_message': error_message,
         'is_edit': is_edit,
         'receipt_review_state': receipt_review_state or _default_receipt_review_state(),
+        'today_iso': date.today().isoformat(),
     }
 
 
@@ -753,9 +775,31 @@ def register_routes(flask_app):
         transcript = (payload.get('transcript') or request.form.get('transcript') or '').strip()
         group_members = _parse_request_group_members(payload, request.form)
         narrator_name = (payload.get('narrator_name') or request.form.get('narrator_name') or '').strip() or None
+        ticket_items = _parse_request_ticket_items(payload, request.form)
+        ticket_total = payload.get('ticket_total') or request.form.get('ticket_total') or 0
+        ticket_tax_amount = payload.get('ticket_tax_amount') or request.form.get('ticket_tax_amount') or 0
+        ticket_tip_amount = payload.get('ticket_tip_amount') or request.form.get('ticket_tip_amount') or 0
+        ticket_merchant_name = (payload.get('ticket_merchant_name') or request.form.get('ticket_merchant_name') or '').strip()
+        ticket_expense_date = (payload.get('ticket_expense_date') or request.form.get('ticket_expense_date') or '').strip()
 
         if not transcript:
             return jsonify({'error': 'transcript is required'}), 400
+
+        if ticket_items:
+            parsed_payload = parser.parse_transcript_with_ticket_context(
+                transcript,
+                transcription_used_ai=_has_ai_parser(),
+                transcription_source='edited-transcript',
+                group_members=group_members,
+                narrator_name=narrator_name,
+                ticket_items=ticket_items,
+                ticket_total=ticket_total,
+                ticket_tax_amount=ticket_tax_amount,
+                ticket_tip_amount=ticket_tip_amount,
+                ticket_merchant_name=ticket_merchant_name,
+                ticket_expense_date=ticket_expense_date,
+            )
+            return jsonify(parsed_payload), 200
 
         draft = parser.parse_transcript(
             transcript,

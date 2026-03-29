@@ -81,23 +81,22 @@ def sanitize_receipt_draft(raw_draft: Any) -> dict[str, Any]:
 
     draft["description"] = _clean_text(raw_draft.get("description"))
     draft["total_amount"] = _clean_amount(raw_draft.get("total_amount"))
-    draft["currency"] = _clean_currency(raw_draft.get("currency"))
+    draft["currency"] = "ARS"
     draft["payer_name"] = ""
     draft["participants"] = []
     draft["tip_amount"] = _clean_amount(raw_draft.get("tip_amount"))
-    draft["notes"] = _clean_text(raw_draft.get("notes"))
-    draft["confidence"] = _clean_confidence(raw_draft.get("confidence"))
+    draft["notes"] = ""
+    draft["confidence"] = 0
     draft["needs_review"] = True
     draft["merchant_name"] = _clean_text(raw_draft.get("merchant_name"))
     draft["subtotal_amount"] = _clean_amount(raw_draft.get("subtotal_amount"))
     draft["tax_amount"] = _clean_amount(raw_draft.get("tax_amount"))
     draft["extracted_items"] = _clean_items(raw_draft.get("extracted_items"))
 
-    if not draft["description"] and draft["merchant_name"]:
-        draft["description"] = f"Receipt from {draft['merchant_name']}"
-
-    if not draft["notes"]:
-        draft["notes"] = "Gemini receipt draft extraction. Review before saving."
+    if draft["merchant_name"]:
+        draft["description"] = draft["merchant_name"]
+    elif not draft["description"]:
+        draft["description"] = "Ticket"
 
     return draft
 

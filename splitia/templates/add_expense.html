@@ -31,7 +31,7 @@
                             <article class="assistant-message assistant-message-ai">
                                 <div class="assistant-avatar">AI</div>
                                 <div class="assistant-bubble">
-                                <p>Contame el gasto como si estuvieras en un chat. Podés escribir, grabar un audio o adjuntar un ticket y después corregir el formulario antes de guardar el gasto.</p>
+                                <p>Contame el gasto con audio o subí un ticket. Voy a completar el formulario y después solo revisás los montos antes de guardar.</p>
                             </div>
                         </article>
                     </div>
@@ -72,13 +72,12 @@
                                 {% if is_edit %}
                                     El ticket se usa para crear nuevos gastos desde una foto. En edición seguís teniendo texto y audio.
                                 {% else %}
-                                    El ticket también puede convertirse en un borrador completo para revisar items y repartir exacto antes de guardar.
+                                    El ticket completa el formulario principal y te deja revisar los items abajo antes de guardar.
                                 {% endif %}
                             </div>
                         </div>
 
                         <div class="assistant-quick-actions">
-                            <button type="button" id="write-option-btn" class="assistant-chip">Escribir</button>
                             <button type="button" id="record-option-btn" class="assistant-chip assistant-chip-primary">Grabar audio</button>
                             <button type="button" id="upload-audio-btn" class="assistant-chip">Subir audio</button>
                             {% if not is_edit %}
@@ -162,7 +161,7 @@
                             type="date"
                             id="expense_date"
                             name="expense_date"
-                            value="{{ request.form.get('expense_date', expense.date if expense and expense.date else '') }}"
+                            value="{{ request.form.get('expense_date', expense.date if expense and expense.date else today_iso) }}"
                         >
                     </div>
 
@@ -227,35 +226,17 @@
                     >
                         <div class="receipt-review-header">
                             <div>
-                                <h2>Review Ticket Draft</h2>
-                                <p>Corregí el borrador, asigná cada item y guardá el gasto con montos exactos por persona.</p>
+                                <h2>Receipt Items</h2>
+                                <p>Revisá merchant, totales e items. Esto actualiza automáticamente el formulario principal.</p>
                             </div>
                             <button type="button" id="receipt-add-item" class="btn btn-outline btn-small">Add Item</button>
                         </div>
 
-                        <form
-                            id="receipt-review-form"
-                            method="POST"
-                            class="form"
-                            data-single-submit="true"
-                            action="{{ url_for('add_expense_receipt_review', group_id=group.id) }}"
-                        >
+                        <div id="receipt-review-form" class="form">
                             <div class="receipt-review-grid">
-                                <div class="form-group">
-                                    <label for="receipt_description">Description</label>
-                                    <input type="text" id="receipt_description" name="description" required>
-                                </div>
                                 <div class="form-group">
                                     <label for="merchant_name">Merchant</label>
                                     <input type="text" id="merchant_name" name="merchant_name">
-                                </div>
-                                <div class="form-group">
-                                    <label for="currency">Currency</label>
-                                    <input type="text" id="currency" name="currency" maxlength="3">
-                                </div>
-                                <div class="form-group">
-                                    <label for="confidence">Confidence</label>
-                                    <input type="number" id="confidence" name="confidence" min="0" max="1" step="0.001">
                                 </div>
                                 <div class="form-group">
                                     <label for="subtotal_amount">Subtotal</label>
@@ -274,21 +255,8 @@
                                     <input type="number" id="receipt_total_amount" name="total_amount" min="0" step="0.01" required>
                                 </div>
                                 <div class="form-group">
-                                    <label for="receipt_payer_id">Payer</label>
-                                    <select id="receipt_payer_id" name="payer_id" required>
-                                        <option value="">-- Select payer --</option>
-                                        {% for member in members %}
-                                            <option value="{{ member.id }}">{{ member.name }}</option>
-                                        {% endfor %}
-                                    </select>
-                                </div>
-                                <div class="form-group">
                                     <label for="receipt_expense_date">Expense date</label>
                                     <input type="date" id="receipt_expense_date" name="expense_date">
-                                </div>
-                                <div class="form-group receipt-review-grid-wide">
-                                    <label for="notes">Notes</label>
-                                    <textarea id="notes" name="notes"></textarea>
                                 </div>
                             </div>
 
@@ -298,26 +266,10 @@
                                 <p id="receipt-items-empty" class="receipt-empty-copy">No items yet. Upload a ticket or add one manually.</p>
                             </section>
 
-                            <section class="receipt-subsection">
-                                <h3>Split Tax Equally Across</h3>
-                                <div id="tax-participants" class="receipt-member-checks"></div>
-                            </section>
-
-                            <section class="receipt-subsection">
-                                <h3>Split Tip Equally Across</h3>
-                                <div id="tip-participants" class="receipt-member-checks"></div>
-                            </section>
-
-                            <section class="receipt-subsection">
-                                <h3>Share Preview</h3>
-                                <div id="receipt-share-summary" class="receipt-share-summary"></div>
-                            </section>
-
                             <div class="form-actions">
-                                <button type="submit" class="btn btn-success">Create Expense From Ticket</button>
                                 <button type="button" id="receipt-reset-btn" class="btn btn-outline">Clear Ticket Draft</button>
                             </div>
-                        </form>
+                        </div>
                     </section>
                 {% endif %}
             </section>

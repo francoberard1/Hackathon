@@ -4,6 +4,7 @@ import json
 import os
 import re
 import ssl
+import unicodedata
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib import error as urllib_error
@@ -172,6 +173,39 @@ def _normalize_name(name: str) -> str:
     if not clean_name:
         return ''
     return ' '.join(piece.capitalize() for piece in clean_name.split())
+
+
+def _strip_accents(value: str) -> str:
+    normalized = unicodedata.normalize('NFKD', value or '')
+    return ''.join(char for char in normalized if not unicodedata.combining(char))
+
+
+def _normalize_match_text(value: str) -> str:
+    text = _strip_accents(_normalize_whitespace(value).lower())
+    text = text.replace('coca cola zero', 'coca light')
+    text = text.replace('coca zero', 'coca light')
+    text = text.replace('coca-cola', 'coca cola')
+    text = text.replace('tagliatella', 'tagliatela')
+    text = text.replace('pene', 'penne')
+    text = re.sub(r'[^a-z0-9\s]', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
+def _normalize_tokens(value: str) -> list[str]:
+    text = _normalize_match_text(value)
+    if not text:
+        return []
+    tokens = []
+    for token in text.split():
+        tokens.append(token)
+        if len(token) > 4 and token.endswith('s'):
+            tokens.append(token[:-1])
+    seen = []
+    for token in tokens:
+        if token and token not in seen:
+            seen.append(token)
+    return seen
 
 
 def _normalize_group_members(group_members: list[str] | None) -> list[str]:
@@ -463,6 +497,286 @@ def _build_participants_from_context(
     return participants
 
 
+def _normalize_ticket_items(ticket_items: list[dict] | None) -> list[dict]:
+    if not isinstance(ticket_items, list):
+        return []
+
+    normalized_items = []
+    for index, item in enumerate(ticket_items):
+        if not isinstance(item, dict):
+            continue
+
+        name = _normalize_whitespace(str(item.get('name') or ''))
+        amount = _parse_number(item.get('amount'))
+        if not name or amount <= 0:
+            continue
+
+        normalized_items.append({
+            'index': index,
+            'name': name,
+            'amount': amount,
+            'match_text': _normalize_match_text(name),
+            'tokens': _normalize_tokens(name),
+        })
+
+    return normalized_items
+
+
+def _extract_excluded_participants(text: str, group_members: list[str]) -> list[str]:
+    excluded = []
+    normalized_text = _normalize_match_text(text)
+
+    for member in group_members:
+        member_pattern = re.escape(_normalize_match_text(member))
+        patterns = [
+            rf'\b{member_pattern}\b[^.]*\bno fue\b',
+            rf'\b{member_pattern}\b[^.]*\bno vino\b',
+            rf'\bmenos\s+{member_pattern}\b',
+            rf'\bexcepto\s+{member_pattern}\b',
+            rf'\bsin\s+{member_pattern}\b',
+        ]
+        if any(re.search(pattern, normalized_text) for pattern in patterns):
+            excluded.append(member)
+
+    return excluded
+
+
+def _extract_remainder_target(text: str, group_members: list[str], payer_name: str) -> str | None:
+    normalized_text = _normalize_match_text(text)
+
+    for member in group_members:
+        member_pattern = re.escape(_normalize_match_text(member))
+        if re.search(
+            rf'\b(?:el\s+resto|lo\s+que\s+falta|todo\s+lo\s+que\s+falta|todo\s+el\s+resto)\b[^.]*\bpara\s+{member_pattern}\b',
+            normalized_text,
+        ):
+            return member
+
+    if payer_name and payer_name in group_members and re.search(
+        r'\b(?:el\s+resto|lo\s+que\s+falta|todo\s+lo\s+que\s+falta|todo\s+el\s+resto)\b[^.]*\bpara\s+(?:el|el mismo|el\b|el que pago|el que pagó|él)\b',
+        normalized_text,
+    ):
+        return payer_name
+
+    return None
+
+
+def _split_clauses(text: str) -> list[str]:
+    return [
+        _normalize_whitespace(fragment)
+        for fragment in re.split(r'[.;:,\n]+', text)
+        if _normalize_whitespace(fragment)
+    ]
+
+
+def _resolve_clause_subject(
+    clause: str,
+    group_members: list[str],
+    payer_name: str,
+    carry_subject: str | None,
+) -> str | None:
+    mentioned_members = _find_group_member_mentions(clause, group_members)
+    if len(mentioned_members) == 1:
+        return mentioned_members[0]
+
+    normalized_clause = _normalize_match_text(clause)
+    if payer_name and payer_name in group_members and re.search(r'\b(?:el|el mismo|el que pago|el que pagó|el que puso|él)\b', normalized_clause):
+        return payer_name
+
+    if carry_subject and re.search(
+        r'^(?:y\s+)?(?:comio|comió|tomo|tomó|pidio|pidió|bebio|bebió|se pidio|se pidió|le corresponde|le toco|le tocó|tuvo|gasto|gastó)\b',
+        normalized_clause,
+    ):
+        return carry_subject
+
+    return None
+
+
+def _item_aliases(item_name: str) -> list[str]:
+    base = _normalize_match_text(item_name)
+    if not base:
+        return []
+
+    aliases = {base}
+
+    if 'coca cola light' in base or 'coca light' in base:
+        aliases.update({'coca light', 'coca cola light'})
+    elif 'coca cola' in base:
+        aliases.update({'coca cola', 'coca'})
+
+    if 'penne' in base:
+        aliases.update({'penne', 'pene'})
+
+    if 'tagliatela' in base:
+        aliases.update({'tagliatela'})
+
+    singular_tokens = []
+    for token in base.split():
+        singular_tokens.append(token[:-1] if len(token) > 4 and token.endswith('s') else token)
+    aliases.add(' '.join(singular_tokens))
+
+    return [alias for alias in aliases if alias]
+
+
+def _match_item_score(clause: str, item: dict) -> float:
+    normalized_clause = _normalize_match_text(clause)
+    clause_tokens = set(_normalize_tokens(clause))
+    best_score = 0.0
+
+    for alias in _item_aliases(item['name']):
+        alias_tokens = set(_normalize_tokens(alias))
+        if not alias_tokens:
+            continue
+
+        if f' {alias} ' in f' {normalized_clause} ':
+            return 1.0 + (0.05 * len(alias_tokens))
+
+        overlap = len(alias_tokens & clause_tokens)
+        if overlap <= 0:
+            continue
+
+        score = overlap / len(alias_tokens)
+        if score > best_score:
+            best_score = score
+
+    return best_score
+
+
+def _build_ticket_assignment_payload(
+    transcript: str,
+    group_members: list[str],
+    payer_name: str,
+    ticket_items: list[dict],
+    ticket_total: float,
+    ticket_tax_amount: float,
+    ticket_tip_amount: float,
+) -> dict:
+    normalized_text = _normalize_whitespace(transcript.lower())
+    normalized_group_members = _normalize_group_members(group_members)
+    normalized_items = _normalize_ticket_items(ticket_items)
+    excluded_participants = _extract_excluded_participants(normalized_text, normalized_group_members)
+    explicit_participants = _extract_explicit_participant_names(normalized_text, normalized_group_members)
+
+    if _mentions_all_group(normalized_text):
+        active_participants = [member for member in normalized_group_members if member not in excluded_participants]
+    elif explicit_participants:
+        active_participants = [member for member in explicit_participants if member not in excluded_participants]
+    else:
+        active_participants = [member for member in normalized_group_members if member not in excluded_participants]
+
+    if not active_participants:
+        active_participants = [member for member in normalized_group_members if member not in excluded_participants]
+
+    item_assignments = []
+    assigned_item_indexes = set()
+    explicit_item_totals = {member: 0.0 for member in active_participants}
+    unmatched_audio_mentions = []
+    carry_subject = None
+
+    for clause in _split_clauses(normalized_text):
+        subject = _resolve_clause_subject(clause, active_participants or normalized_group_members, payer_name, carry_subject)
+        if subject:
+            carry_subject = subject
+
+        if not subject:
+            continue
+
+        scored_items = []
+        for item in normalized_items:
+            if item['index'] in assigned_item_indexes:
+                continue
+            score = _match_item_score(clause, item)
+            if score >= 0.75:
+                scored_items.append((score, item))
+
+        if not scored_items and re.search(r'\b(?:comio|comió|tomo|tomó|pidio|pidió|bebio|bebió|se pidio|se pidió)\b', clause):
+            unmatched_audio_mentions.append(clause)
+            continue
+
+        for _score, item in sorted(scored_items, key=lambda entry: entry[0], reverse=True):
+            assigned_item_indexes.add(item['index'])
+            explicit_item_totals[subject] = round(explicit_item_totals.get(subject, 0.0) + item['amount'], 2)
+            item_assignments.append({
+                'item_index': item['index'],
+                'assigned_user_name': subject,
+                'confidence': round(min(_score, 1.0), 2),
+                'match_type': 'explicit-item',
+            })
+
+    explicit_amount_targets = _extract_member_amounts(
+        normalized_text,
+        active_participants or normalized_group_members,
+        payer_name=payer_name,
+    )
+    explicit_members = {
+        assignment['assigned_user_name']
+        for assignment in item_assignments
+    } | {
+        member for member, amount in explicit_amount_targets.items() if amount > 0
+    }
+
+    share_amounts = {member: 0.0 for member in active_participants}
+    for member, amount in explicit_item_totals.items():
+        share_amounts[member] = round(share_amounts.get(member, 0.0) + amount, 2)
+
+    unresolved_item_total = round(sum(
+        item['amount'] for item in normalized_items if item['index'] not in assigned_item_indexes
+    ), 2)
+
+    for member, target_amount in explicit_amount_targets.items():
+        if member not in share_amounts:
+            share_amounts[member] = 0.0
+        delta = round(max(target_amount - share_amounts[member], 0.0), 2)
+        if delta <= 0:
+            continue
+        allocation = min(delta, unresolved_item_total)
+        share_amounts[member] = round(share_amounts[member] + allocation, 2)
+        unresolved_item_total = round(max(unresolved_item_total - allocation, 0.0), 2)
+
+    remainder_target = _extract_remainder_target(normalized_text, active_participants or normalized_group_members, payer_name)
+    if remainder_target and remainder_target not in share_amounts:
+        share_amounts[remainder_target] = 0.0
+
+    if unresolved_item_total > 0:
+        if remainder_target:
+            remainder_targets = [remainder_target]
+        else:
+            unnamed_targets = [
+                member for member in active_participants
+                if member not in explicit_members
+            ]
+            remainder_targets = unnamed_targets or active_participants or normalized_group_members
+
+        split_remainder = _split_amount_evenly(unresolved_item_total, len(remainder_targets))
+        for index, member in enumerate(remainder_targets):
+            share_amounts[member] = round(share_amounts.get(member, 0.0) + split_remainder[index], 2)
+
+    tax_tip_total = round(ticket_tax_amount + ticket_tip_amount, 2)
+    tax_tip_targets = active_participants or normalized_group_members
+    if tax_tip_total > 0 and tax_tip_targets:
+        split_tax_tip = _split_amount_evenly(tax_tip_total, len(tax_tip_targets))
+        for index, member in enumerate(tax_tip_targets):
+            share_amounts[member] = round(share_amounts.get(member, 0.0) + split_tax_tip[index], 2)
+
+    expected_total = round(ticket_total, 2) if ticket_total > 0 else round(sum(share_amounts.values()), 2)
+    current_total = round(sum(share_amounts.values()), 2)
+    difference = round(expected_total - current_total, 2)
+    if tax_tip_targets and abs(difference) > 0.01:
+        share_amounts[tax_tip_targets[-1]] = round(share_amounts.get(tax_tip_targets[-1], 0.0) + difference, 2)
+
+    return {
+        'item_assignments': item_assignments,
+        'share_amounts_by_user_name': {
+            member: round(amount, 2)
+            for member, amount in share_amounts.items()
+            if amount > 0
+        },
+        'detected_participants': active_participants,
+        'excluded_participants': excluded_participants,
+        'unmatched_audio_mentions': unmatched_audio_mentions,
+    }
+
+
 def _safe_json_loads(raw_content: str) -> dict:
     if not raw_content:
         return {}
@@ -660,6 +974,15 @@ def _extract_currency(text: str) -> str:
 
 
 def _extract_payer_name(text: str) -> str:
+    def clean_candidate(raw_candidate: str) -> str:
+        candidate = _normalize_name(raw_candidate)
+        candidate = re.sub(r'^(?:Este|Esta|El|La|Lo|Gasto|Ticket)\s+', '', candidate)
+        candidate = re.sub(r'\s+(?:Y|E|Salio|Salió)$', '', candidate)
+        banned = {'Este', 'Esta', 'El', 'La', 'Lo', 'Gasto', 'Ticket'}
+        candidate_tokens = [token for token in candidate.split() if token not in banned]
+        candidate = ' '.join(candidate_tokens[:2]).strip()
+        return candidate or 'Unknown'
+
     yo_patterns = [
         r'\byo pag(?:ue|ué)\b',
         r'\blo pag(?:ue|ué) yo\b',
@@ -668,14 +991,20 @@ def _extract_payer_name(text: str) -> str:
     if any(re.search(pattern, text) for pattern in yo_patterns):
         return 'Yo'
 
+    direct_object_match = re.search(
+        r'\blo\s+pag(?:o|ó)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+)?)',
+        text
+    )
+    if direct_object_match:
+        candidate = clean_candidate(direct_object_match.group(1))
+        return candidate or 'Unknown'
+
     leading_name_match = re.search(
         r'([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+)?)\s+(?:pag(?:o|ó)|pagaron|paga|abon(?:o|ó)|puso)\b',
         text
     )
     if leading_name_match:
-        candidate = _normalize_name(leading_name_match.group(1))
-        candidate = re.sub(r'^(Y|E)\s+', '', candidate)
-        candidate = re.sub(r'\s+(Y|E|Salio|Salió)$', '', candidate)
+        candidate = clean_candidate(leading_name_match.group(1))
         return candidate or 'Unknown'
 
     match = re.search(
@@ -683,9 +1012,7 @@ def _extract_payer_name(text: str) -> str:
         text
     )
     if match:
-        candidate = _normalize_name(match.group(1))
-        candidate = re.sub(r'^(Y|E)\s+', '', candidate)
-        candidate = re.sub(r'\s+(Y|E)$', '', candidate)
+        candidate = clean_candidate(match.group(1))
         return candidate or 'Unknown'
 
     return 'Unknown'
@@ -1015,6 +1342,65 @@ def parse_transcript(
         group_members=group_members,
         narrator_name=narrator_name,
     )
+
+
+def parse_transcript_with_ticket_context(
+    transcript: str,
+    transcription_used_ai: bool = False,
+    transcription_source: str = 'manual',
+    group_members: list[str] | None = None,
+    narrator_name: str | None = None,
+    ticket_items: list[dict] | None = None,
+    ticket_total: float = 0.0,
+    ticket_tax_amount: float = 0.0,
+    ticket_tip_amount: float = 0.0,
+    ticket_merchant_name: str = '',
+    ticket_expense_date: str = '',
+) -> dict:
+    draft = parse_transcript(
+        transcript,
+        transcription_used_ai=transcription_used_ai,
+        transcription_source=transcription_source,
+        group_members=group_members,
+        narrator_name=narrator_name,
+    )
+
+    normalized_group_members = _normalize_group_members(group_members)
+    normalized_items = _normalize_ticket_items(ticket_items)
+    if not normalized_items or not normalized_group_members:
+        return {'draft': draft.model_dump()}
+
+    assignment = _build_ticket_assignment_payload(
+        transcript,
+        normalized_group_members,
+        draft.payer_name,
+        normalized_items,
+        ticket_total=_parse_number(ticket_total),
+        ticket_tax_amount=_parse_number(ticket_tax_amount),
+        ticket_tip_amount=_parse_number(ticket_tip_amount),
+    )
+
+    share_amounts = assignment.get('share_amounts_by_user_name') or {}
+    if share_amounts:
+        draft.participants = [
+            ExpenseParticipantDraft(name=name, amount=round(amount, 2))
+            for name, amount in share_amounts.items()
+        ]
+        if _parse_number(ticket_total) > 0:
+            draft.total_amount = _parse_number(ticket_total)
+
+    if ticket_merchant_name:
+        draft.description = _normalize_whitespace(ticket_merchant_name)
+
+    if ticket_expense_date and not draft.expense_date:
+        draft.expense_date = _normalize_whitespace(ticket_expense_date)
+
+    draft.currency = 'ARS'
+
+    return {
+        'draft': draft.model_dump(),
+        'ticket_assignment': assignment,
+    }
 
 
 def parse_audio_to_draft(audio_file_path: str) -> ExpenseDraft:

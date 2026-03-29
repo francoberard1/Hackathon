@@ -592,10 +592,6 @@ section.section h2 {
     gap: 16px;
 }
 
-.receipt-review-grid-wide {
-    grid-column: 1 / -1;
-}
-
 .receipt-subsection {
     margin-top: 10px;
     padding: 18px;
@@ -648,42 +644,6 @@ section.section h2 {
 .receipt-empty-copy {
     color: #64748b;
     font-style: italic;
-}
-
-.receipt-member-checks {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 10px;
-}
-
-.receipt-member-check {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 14px;
-    border: 1px solid #dbe4f0;
-    border-radius: 12px;
-    background: white;
-}
-
-.receipt-share-summary {
-    display: grid;
-    gap: 10px;
-}
-
-.receipt-summary-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 10px 12px;
-    border-radius: 10px;
-    background: white;
-    border: 1px solid #dbe4f0;
-    font-weight: 600;
-}
-
-.receipt-summary-row.is-muted {
-    color: #64748b;
 }
 
 @keyframes assistantWave {
@@ -1299,6 +1259,7 @@ body[data-theme="dark"] .assistant-composer textarea,
 body[data-theme="dark"] .form-group label,
 body[data-theme="dark"] .balance-name,
 body[data-theme="dark"] .members-list li,
+body[data-theme="dark"] .receipt-subsection h3,
 body[data-theme="dark"] .expense-header strong,
 body[data-theme="dark"] .transaction-body,
 body[data-theme="dark"] section.section h2,
@@ -1309,9 +1270,22 @@ body[data-theme="dark"] .chart-header h3 {
 }
 
 body[data-theme="dark"] .members-list li,
-body[data-theme="dark"] .balance-row {
+body[data-theme="dark"] .balance-row,
+body[data-theme="dark"] .receipt-item-row,
+body[data-theme="dark"] .receipt-subsection {
     background: #1f2937;
     border-color: #3b82f6;
+}
+
+body[data-theme="dark"] .receipt-review-section {
+    background: linear-gradient(180deg, #111827 0%, #0f172a 100%);
+    border-color: #1f2937;
+}
+
+body[data-theme="dark"] .receipt-review-header p,
+body[data-theme="dark"] .receipt-empty-copy,
+body[data-theme="dark"] .receipt-item-toggle {
+    color: #94a3b8;
 }
 
 body[data-theme="dark"] .balance-positive {

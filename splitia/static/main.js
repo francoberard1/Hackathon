@@ -265,7 +265,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const composerSendBtn = document.getElementById('composer-send-btn');
     const micRecordBtn = document.getElementById('mic-record-btn');
     const recordOptionBtn = document.getElementById('record-option-btn');
-    const writeOptionBtn = document.getElementById('write-option-btn');
     const uploadAudioBtn = document.getElementById('upload-audio-btn');
     const uploadTicketBtn = document.getElementById('upload-ticket-btn');
     const audioFileInput = document.getElementById('audio_file');
@@ -410,11 +409,21 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function handleParsedDraft(draft) {
+        const payload = draft && draft.draft ? draft : { draft: draft };
+
         appendMessage(
             'assistant',
             '<p><strong>Formulario completado.</strong> Revisá payer, participantes y montos por persona antes de guardar.</p>'
         );
-        applyDraftToExpenseForm(draft);
+        applyDraftToExpenseForm(payload.draft || {});
+
+        if (
+            payload.ticket_assignment &&
+            window.splitiaReceiptBridge &&
+            typeof window.splitiaReceiptBridge.applyTicketAssignment === 'function'
+        ) {
+            window.splitiaReceiptBridge.applyTicketAssignment(payload.ticket_assignment);
+        }
     }
 
     function applyDraftToExpenseForm(draft) {
@@ -435,7 +444,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (totalAmountInput && typeof draft.total_amount === 'number') {
             totalAmountInput.value = draft.total_amount;
             if (totalHint) {
-                totalHint.textContent = 'Draft currency: ' + (draft.currency || 'ARS') + (draft.expense_date ? ' | Fecha detectada: ' + draft.expense_date : '');
+                totalHint.textContent = draft.expense_date
+                    ? 'Fecha detectada: ' + draft.expense_date
+                    : 'Monto en pesos detectado automáticamente.';
             }
         }
 
@@ -523,16 +534,28 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function requestDraftFromTranscript(transcript) {
+        const requestBody = {
+            transcript: transcript,
+            group_members: getCurrentGroupMembers(),
+            narrator_name: getCurrentNarratorHint()
+        };
+
+        if (
+            window.splitiaReceiptBridge &&
+            typeof window.splitiaReceiptBridge.getTicketContext === 'function'
+        ) {
+            const ticketContext = window.splitiaReceiptBridge.getTicketContext();
+            if (ticketContext) {
+                Object.assign(requestBody, ticketContext);
+            }
+        }
+
         const response = await fetch('/api/audio/parse', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                transcript: transcript,
-                group_members: getCurrentGroupMembers(),
-                narrator_name: getCurrentNarratorHint()
-            })
+            body: JSON.stringify(requestBody)
         });
 
         const payload = await response.json();
@@ -660,11 +683,6 @@ document.addEventListener('DOMContentLoaded', function() {
     micRecordBtn.addEventListener('click', toggleRecording);
     recordOptionBtn.addEventListener('click', toggleRecording);
 
-    writeOptionBtn.addEventListener('click', function() {
-        composerInput.focus();
-        setAttachmentSummary('Escribí el gasto como en un chat. Lo vamos a estructurar y volcar directo al formulario.', false);
-    });
-
     uploadAudioBtn.addEventListener('click', function() {
         audioFileInput.click();
     });
@@ -712,11 +730,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const itemsEmpty = document.getElementById('receipt-items-empty');
     const addItemButton = document.getElementById('receipt-add-item');
     const resetButton = document.getElementById('receipt-reset-btn');
-    const shareSummary = document.getElementById('receipt-share-summary');
-    const taxParticipants = document.getElementById('tax-participants');
-    const tipParticipants = document.getElementById('tip-participants');
     const membersDataElement = document.getElementById('receipt-members-data');
     const reviewDataElement = document.getElementById('receipt-review-data');
+    const descriptionInput = document.getElementById('description');
+    const totalAmountInput = document.getElementById('total_amount');
+    const expenseDateInput = document.getElementById('expense_date');
+    const totalHint = document.getElementById('draft-total-hint');
+    const participantHint = document.getElementById('draft-participant-hint');
+    const shareSumHint = document.getElementById('draft-share-sum-hint');
 
     if (
         !reviewCard ||
@@ -726,17 +747,20 @@ document.addEventListener('DOMContentLoaded', function() {
         !itemsEmpty ||
         !addItemButton ||
         !resetButton ||
-        !shareSummary ||
-        !taxParticipants ||
-        !tipParticipants ||
         !membersDataElement ||
-        !reviewDataElement
+        !reviewDataElement ||
+        !descriptionInput ||
+        !totalAmountInput ||
+        !expenseDateInput
     ) {
         return;
     }
 
     const members = JSON.parse(membersDataElement.textContent || '[]');
     const initialReviewState = JSON.parse(reviewDataElement.textContent || '{}');
+    const todayIso = new Date().toLocaleDateString('en-CA');
+    let shareOverrideByMemberId = null;
+    let applyingTicketAssignment = false;
 
     function escapeHtml(value) {
         return String(value || '')
@@ -800,28 +824,72 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    function renderParticipantCheckboxes(container, fieldName, selectedIds) {
-        container.innerHTML = members.map(function(member) {
-            const checked = selectedIds.includes(String(member.id)) ? ' checked' : '';
-            return (
-                '<label class="receipt-member-check">' +
-                    '<input type="checkbox" name="' + fieldName + '" value="' + member.id + '"' + checked + '>' +
-                    '<span>' + escapeHtml(member.name) + '</span>' +
-                '</label>'
-            );
-        }).join('');
+    function normalizeMatchText(value) {
+        return String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function clearShareOverride() {
+        shareOverrideByMemberId = null;
+    }
+
+    function memberIdByName(name) {
+        const normalized = normalizeMatchText(name);
+        const match = members.find(function(member) {
+            return normalizeMatchText(member.name) === normalized;
+        });
+        return match ? String(match.id) : '';
+    }
+
+    function getTicketContext() {
+        const activeRows = Array.from(itemsContainer.querySelectorAll('.receipt-item-row'));
+        if (!activeRows.length || reviewCard.classList.contains('assistant-hidden')) {
+            return null;
+        }
+
+        const ticketItems = activeRows
+            .map(function(row) {
+                const enabled = row.querySelector('input[name="item_enabled[]"]').value !== '0';
+                if (!enabled) {
+                    return null;
+                }
+                return {
+                    name: row.querySelector('input[name="item_name[]"]').value,
+                    amount: row.querySelector('input[name="item_amount[]"]').value,
+                };
+            })
+            .filter(Boolean);
+
+        if (!ticketItems.length) {
+            return null;
+        }
+
+        return {
+            ticket_items: ticketItems,
+            ticket_total: document.getElementById('receipt_total_amount').value,
+            ticket_tax_amount: document.getElementById('tax_amount').value,
+            ticket_tip_amount: document.getElementById('tip_amount').value,
+            ticket_merchant_name: document.getElementById('merchant_name').value,
+            ticket_expense_date: document.getElementById('receipt_expense_date').value,
+        };
     }
 
     function createItemRow(item) {
         const row = document.createElement('div');
         row.className = 'receipt-item-row';
+        row.dataset.assignmentMode = item.assignment_mode || 'auto';
         row.innerHTML =
             '<div class="form-group">' +
                 '<label>Item name</label>' +
                 '<input type="text" name="item_name[]" value="' + escapeHtml(item.name || '') + '"' + (item.enabled === false ? '' : ' required') + '>' +
             '</div>' +
             '<div class="form-group">' +
-                '<label>Amount</label>' +
+                '<label>Amount ($)</label>' +
                 '<input type="number" name="item_amount[]" min="0" step="0.01" value="' + escapeHtml(item.amount || '') + '"' + (item.enabled === false ? '' : ' required') + '>' +
             '</div>' +
             '<div class="form-group">' +
@@ -856,6 +924,17 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         row.querySelectorAll('input, select').forEach(function(field) {
+            if (field.name === 'item_user_id[]') {
+                field.addEventListener('change', function() {
+                    if (!applyingTicketAssignment) {
+                        row.dataset.assignmentMode = 'manual';
+                        clearShareOverride();
+                    }
+                });
+            } else if (!applyingTicketAssignment) {
+                field.addEventListener('input', clearShareOverride);
+                field.addEventListener('change', clearShareOverride);
+            }
             field.addEventListener('input', updateShareSummary);
             field.addEventListener('change', updateShareSummary);
         });
@@ -868,14 +947,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function updateItemsEmptyState() {
         itemsEmpty.style.display = itemsContainer.children.length ? 'none' : 'block';
-    }
-
-    function collectSelectedParticipantIds(fieldName) {
-        return Array.from(reviewForm.querySelectorAll('input[name="' + fieldName + '"]:checked'))
-            .map(function(input) {
-                return Number.parseInt(input.value, 10);
-            })
-            .filter(Number.isInteger);
     }
 
     function allocateEvenSplit(shareCents, participantIds, amountCents) {
@@ -893,11 +964,74 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    function syncMainForm(shareCents, merchantName, totalAmount, expenseDate) {
+        const participantCheckboxes = Array.from(document.querySelectorAll('input[name^="participant_"]'));
+
+        descriptionInput.value = merchantName || 'Ticket';
+        totalAmountInput.value = totalAmount || '';
+        expenseDateInput.value = expenseDate || todayIso;
+
+        if (totalHint) {
+            totalHint.textContent = expenseDateInput.value
+                ? 'Fecha detectada: ' + expenseDateInput.value
+                : 'Monto extraído del ticket.';
+        }
+
+        participantCheckboxes.forEach(function(checkbox) {
+            const memberId = checkbox.id.replace('participant_', '');
+            const shareInput = document.getElementById('share_amount_' + memberId);
+            const cents = shareCents[memberId] || 0;
+            const isActive = cents > 0;
+
+            checkbox.checked = isActive;
+            if (shareInput) {
+                shareInput.disabled = !isActive;
+                shareInput.value = isActive ? fromCents(cents) : '';
+                shareInput.dataset.manual = isActive ? 'true' : 'false';
+            }
+        });
+
+        if (participantHint) {
+            const summary = members
+                .filter(function(member) { return (shareCents[member.id] || 0) > 0; })
+                .map(function(member) {
+                    return member.name + ': $' + fromCents(shareCents[member.id]);
+                });
+            participantHint.textContent = summary.length
+                ? 'Ticket split: ' + summary.join(' | ')
+                : 'Activá a cada persona y ajustá cuánto debe cada una.';
+        }
+
+        if (shareSumHint) {
+            const totalCents = Object.values(shareCents).reduce(function(sum, cents) {
+                return sum + cents;
+            }, 0);
+            shareSumHint.textContent = 'Montos por persona desde ticket: $' + fromCents(totalCents);
+            shareSumHint.classList.remove('assistant-error');
+        }
+
+        totalAmountInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
     function updateShareSummary() {
         const shareCents = {};
         members.forEach(function(member) {
             shareCents[member.id] = 0;
         });
+
+        if (shareOverrideByMemberId) {
+            Object.keys(shareOverrideByMemberId).forEach(function(memberId) {
+                shareCents[memberId] = shareOverrideByMemberId[memberId] || 0;
+            });
+
+            syncMainForm(
+                shareCents,
+                document.getElementById('merchant_name').value,
+                document.getElementById('receipt_total_amount').value,
+                document.getElementById('receipt_expense_date').value
+            );
+            return;
+        }
 
         Array.from(itemsContainer.querySelectorAll('.receipt-item-row')).forEach(function(row) {
             const enabled = row.querySelector('input[name="item_enabled[]"]').value !== '0';
@@ -912,53 +1046,87 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        allocateEvenSplit(shareCents, collectSelectedParticipantIds('tax_split_participants'), toCents(document.getElementById('tax_amount').value));
-        allocateEvenSplit(shareCents, collectSelectedParticipantIds('tip_split_participants'), toCents(document.getElementById('tip_amount').value));
+        const activeParticipantIds = members
+            .map(function(member) { return member.id; })
+            .filter(function(memberId) { return (shareCents[memberId] || 0) > 0; });
 
-        const rows = members
-            .map(function(member) {
-                return { member: member, cents: shareCents[member.id] || 0 };
-            })
-            .filter(function(entry) {
-                return entry.cents > 0;
-            });
+        allocateEvenSplit(shareCents, activeParticipantIds, toCents(document.getElementById('tax_amount').value));
+        allocateEvenSplit(shareCents, activeParticipantIds, toCents(document.getElementById('tip_amount').value));
 
-        const totalPreview = rows.reduce(function(sum, entry) {
-            return sum + entry.cents;
-        }, 0);
-        const targetTotal = toCents(document.getElementById('receipt_total_amount').value);
+        syncMainForm(
+            shareCents,
+            document.getElementById('merchant_name').value,
+            document.getElementById('receipt_total_amount').value,
+            document.getElementById('receipt_expense_date').value
+        );
+    }
 
-        if (!rows.length) {
-            shareSummary.innerHTML = '<div class="receipt-summary-row is-muted"><span>No assigned shares yet.</span><span>$0.00</span></div>';
+    function applyTicketAssignment(ticketAssignment) {
+        if (!ticketAssignment || !Array.isArray(ticketAssignment.item_assignments)) {
             return;
         }
 
-        shareSummary.innerHTML = rows.map(function(entry) {
-            return (
-                '<div class="receipt-summary-row">' +
-                    '<span>' + escapeHtml(entry.member.name) + '</span>' +
-                    '<span>$' + fromCents(entry.cents) + '</span>' +
-                '</div>'
-            );
-        }).join('') +
-            '<div class="receipt-summary-row is-muted"><span>Computed total</span><span>$' + fromCents(totalPreview) + '</span></div>' +
-            '<div class="receipt-summary-row is-muted"><span>Reviewed total</span><span>$' + fromCents(targetTotal) + '</span></div>';
+        const rows = Array.from(itemsContainer.querySelectorAll('.receipt-item-row'));
+        const override = {};
+        members.forEach(function(member) {
+            override[String(member.id)] = 0;
+        });
+
+        Object.entries(ticketAssignment.share_amounts_by_user_name || {}).forEach(function(entry) {
+            const memberId = memberIdByName(entry[0]);
+            const amount = Number.parseFloat(entry[1] || 0);
+            if (memberId && Number.isFinite(amount) && amount > 0) {
+                override[memberId] = Math.round(amount * 100);
+            }
+        });
+
+        applyingTicketAssignment = true;
+        try {
+            ticketAssignment.item_assignments.forEach(function(assignment) {
+                const row = rows[assignment.item_index];
+                if (!row || row.dataset.assignmentMode === 'manual') {
+                    return;
+                }
+
+                const select = row.querySelector('select[name="item_user_id[]"]');
+                const memberId = memberIdByName(assignment.assigned_user_name);
+                if (!select || !memberId) {
+                    return;
+                }
+
+                select.value = memberId;
+                row.dataset.assignmentMode = 'auto';
+            });
+        } finally {
+            applyingTicketAssignment = false;
+        }
+
+        shareOverrideByMemberId = override;
+        updateShareSummary();
+
+        const assignedCount = ticketAssignment.item_assignments.length;
+        const unmatchedCount = (ticketAssignment.unmatched_audio_mentions || []).length;
+        setAttachmentSummary(
+            'Audio aplicado sobre ticket. ' + assignedCount + ' item(s) asignados' +
+            (unmatchedCount ? ', ' + unmatchedCount + ' mención(es) quedaron en remanente.' : '.'),
+            false
+        );
+        appendAssistantMessage(
+            '<p><strong>Audio aplicado sobre el ticket.</strong> ' +
+            assignedCount + ' item(s) quedaron asignados y el resto se repartió automáticamente.</p>'
+        );
     }
 
     function setReviewState(state) {
         reviewCard.classList.remove('assistant-hidden');
+        clearShareOverride();
 
-        setFieldValue('receipt_description', state.description || '');
         setFieldValue('merchant_name', state.merchant_name || '');
-        setFieldValue('currency', state.currency || 'ARS');
-        setFieldValue('confidence', state.confidence || '');
         setFieldValue('subtotal_amount', state.subtotal_amount || '');
         setFieldValue('tax_amount', state.tax_amount || '');
         setFieldValue('tip_amount', state.tip_amount || '');
         setFieldValue('receipt_total_amount', state.total_amount || '');
-        setFieldValue('notes', state.notes || '');
-        setFieldValue('receipt_payer_id', state.payer_id || '');
-        setFieldValue('receipt_expense_date', state.expense_date || '');
+        setFieldValue('receipt_expense_date', state.expense_date || todayIso);
 
         itemsContainer.innerHTML = '';
         const items = Array.isArray(state.items) && state.items.length
@@ -974,23 +1142,8 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
 
-        renderParticipantCheckboxes(
-            taxParticipants,
-            'tax_split_participants',
-            (state.selected_tax_participants || members.map(function(member) {
-                return String(member.id);
-            })).map(String)
-        );
-        renderParticipantCheckboxes(
-            tipParticipants,
-            'tip_split_participants',
-            (state.selected_tip_participants || members.map(function(member) {
-                return String(member.id);
-            })).map(String)
-        );
-
         reviewForm.querySelectorAll(
-            '#tax-participants input, #tip-participants input, #receipt_description, #merchant_name, #currency, #confidence, #subtotal_amount, #tax_amount, #tip_amount, #receipt_total_amount, #receipt_payer_id, #receipt_expense_date, #notes'
+            '#merchant_name, #subtotal_amount, #tax_amount, #tip_amount, #receipt_total_amount, #receipt_expense_date'
         ).forEach(function(field) {
             field.addEventListener('input', updateShareSummary);
             field.addEventListener('change', updateShareSummary);
@@ -1026,8 +1179,8 @@ document.addEventListener('DOMContentLoaded', function() {
         requestReceiptDraft(file)
             .then(function(payload) {
                 setReviewState(payload);
-                setAttachmentSummary('Borrador del ticket listo. Revisá items, tax y tip antes de guardar.', false);
-                appendAssistantMessage('<p><strong>Borrador del ticket extraído.</strong> Ya podés revisar cada item y repartir el gasto exacto.</p>');
+                setAttachmentSummary('Ticket leído. Revisá merchant, total e items antes de guardar.', false);
+                appendAssistantMessage('<p><strong>Ticket procesado.</strong> Completé el formulario principal y dejé los items listos para revisar.</p>');
             })
             .catch(function(error) {
                 setAttachmentSummary(error.message || 'No pudimos extraer el ticket.', true);
@@ -1046,35 +1199,25 @@ document.addEventListener('DOMContentLoaded', function() {
     resetButton.addEventListener('click', function() {
         reviewCard.classList.add('assistant-hidden');
         itemsContainer.innerHTML = '';
-        reviewForm.reset();
-        renderParticipantCheckboxes(
-            taxParticipants,
-            'tax_split_participants',
-            members.map(function(member) { return String(member.id); })
-        );
-        renderParticipantCheckboxes(
-            tipParticipants,
-            'tip_split_participants',
-            members.map(function(member) { return String(member.id); })
-        );
+        clearShareOverride();
+        reviewForm.querySelectorAll('input').forEach(function(input) {
+            input.value = '';
+        });
+        setFieldValue('receipt_expense_date', todayIso);
         updateItemsEmptyState();
         updateShareSummary();
         setAttachmentSummary('Borrador del ticket descartado. Podés subir otro o seguir con carga manual.', false);
     });
 
+    window.splitiaReceiptBridge = {
+        getTicketContext: getTicketContext,
+        applyTicketAssignment: applyTicketAssignment,
+    };
+
     if (initialReviewState && Array.isArray(initialReviewState.items) && initialReviewState.items.length) {
         setReviewState(initialReviewState);
     } else {
-        renderParticipantCheckboxes(
-            taxParticipants,
-            'tax_split_participants',
-            members.map(function(member) { return String(member.id); })
-        );
-        renderParticipantCheckboxes(
-            tipParticipants,
-            'tip_split_participants',
-            members.map(function(member) { return String(member.id); })
-        );
+        setFieldValue('receipt_expense_date', todayIso);
         updateShareSummary();
     }
 });
