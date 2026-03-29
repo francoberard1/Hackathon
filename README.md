@@ -304,6 +304,24 @@ That leaves room for future analytics like:
 - archived-group lifecycle analysis
 - AI-assisted usage adoption
 
+## Business model
+
+Our business model combines **two complementary revenue streams**.
+
+The first, and main one, is allowing users to **settle debts directly inside the product** through a payment integration such as **Mercado Pago**, charging a **0.99% fee per transaction**. Since part of that percentage would also be absorbed by the payment processor, the estimated net margin for SplitIA would be around **0.19% to 0.20%**, so the business logic is not based on high margin per operation, but on scaling usage volume across many groups and settlements.
+
+The second revenue stream appears when users decide **not** to pay inside the application and prefer to settle the debt outside the platform. In that case, SplitIA can monetize that exit point through **ads or sponsored placements**, generating revenue even when the transaction is completed externally.
+
+Why this model makes sense for us:
+
+- it keeps the barrier to entry low, since the user still has the option to pay outside the app
+- it monetizes the moment of highest value when a debt is actually resolved
+- Mercado Pago is a credible and familiar path for users in Argentina
+- even users who do not convert to in-app payments can still be monetized through the external payment flow
+- the model is designed to scale with real usage, not only with registrations
+
+For this reason, the business model we are defending is a **mixed monetization strategy**: low-fee in-app payments as the core, and ads as a complementary revenue stream.
+
 ## Submission note
 
 This repository contains a working hackathon implementation, not a mockup.
