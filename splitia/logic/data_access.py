@@ -9,7 +9,7 @@ By isolating storage code here, routes and business logic do not need to
 change when the persistence backend changes.
 """
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from .supabase_client import get_supabase_client, has_supabase_config
 
@@ -49,6 +49,7 @@ def _to_group(row, members=None):
         'id': row['id'],
         'name': row['name'],
         'members': members if members is not None else [],
+        'deactivated_at': row.get('deactivated_at'),
     }
 
 
@@ -103,7 +104,8 @@ def insert_group(name):
     groups[group_id] = {
         'id': group_id,
         'name': name,
-        'members': []
+        'members': [],
+        'deactivated_at': None,
     }
     return group_id
 
@@ -114,8 +116,9 @@ def fetch_group(group_id):
         supabase = get_supabase_client()
         row = _single_row(
             supabase.table('groups')
-            .select('id, name')
+            .select('id, name, deactivated_at')
             .eq('id', group_id)
+            .is_('deactivated_at', 'null')
             .limit(1)
             .execute()
         )
@@ -133,24 +136,31 @@ def fetch_all_groups():
         supabase = get_supabase_client()
         rows = _response_rows(
             supabase.table('groups')
-            .select('id, name')
+            .select('id, name, deactivated_at')
+            .is_('deactivated_at', 'null')
             .order('id')
             .execute()
         )
-        return [_to_group(row) for row in rows]
+        groups_with_members = []
+        for row in rows:
+            members = fetch_users_in_group(row['id'])
+            groups_with_members.append(_to_group(row, members=[member['id'] for member in members]))
+        return groups_with_members
 
-    return list(groups.values())
+    return [group for group in groups.values() if not group.get('deactivated_at')]
 
 
 def delete_group_record(group_id):
-    """Delete one group record."""
+    """Soft-delete one group record."""
     if _using_supabase():
         supabase = get_supabase_client()
-        supabase.table('groups').delete().eq('id', group_id).execute()
+        supabase.table('groups').update({
+            'deactivated_at': datetime.now(timezone.utc).isoformat(),
+        }).eq('id', group_id).execute()
         return
 
     if group_id in groups:
-        del groups[group_id]
+        groups[group_id]['deactivated_at'] = datetime.now(timezone.utc).isoformat()
 
 
 def insert_user(name, group_id):
@@ -298,6 +308,7 @@ def delete_expense_record(expense_id):
     """Delete an expense and all share rows attached to it."""
     if _using_supabase():
         supabase = get_supabase_client()
+        supabase.table('expense_shares').delete().eq('expense_id', expense_id).execute()
         supabase.table('expenses').delete().eq('id', expense_id).execute()
         return
 
@@ -305,6 +316,46 @@ def delete_expense_record(expense_id):
         return
 
     del expenses[expense_id]
+    shares_to_delete = [
+        share_id for share_id, share in expense_shares.items()
+        if share['expense_id'] == expense_id
+    ]
+    for share_id in shares_to_delete:
+        del expense_shares[share_id]
+
+
+def update_expense_record(expense_id, description, total_amount, payer_id, expense_date=None):
+    """Update the main expense row."""
+    expense_date = expense_date or date.today().isoformat()
+
+    if _using_supabase():
+        supabase = get_supabase_client()
+        supabase.table('expenses').update({
+            'description': description,
+            'total_amount': total_amount,
+            'payer_id': payer_id,
+            'expense_date': expense_date,
+        }).eq('id', expense_id).execute()
+        return
+
+    if expense_id not in expenses:
+        return
+
+    expenses[expense_id].update({
+        'description': description,
+        'total_amount': total_amount,
+        'payer_id': payer_id,
+        'date': expense_date,
+    })
+
+
+def delete_expense_shares_for_expense(expense_id):
+    """Delete all shares for a single expense."""
+    if _using_supabase():
+        supabase = get_supabase_client()
+        supabase.table('expense_shares').delete().eq('expense_id', expense_id).execute()
+        return
+
     shares_to_delete = [
         share_id for share_id, share in expense_shares.items()
         if share['expense_id'] == expense_id

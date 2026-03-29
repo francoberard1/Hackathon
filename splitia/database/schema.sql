@@ -10,7 +10,8 @@ DROP TABLE IF EXISTS groups;
 CREATE TABLE groups (
     id BIGSERIAL PRIMARY KEY,
     name TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deactivated_at TIMESTAMPTZ
 );
 
 CREATE TABLE users (

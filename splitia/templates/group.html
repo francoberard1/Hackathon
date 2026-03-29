@@ -38,6 +38,16 @@
                 <a href="{{ url_for('add_user', group_id=group.id) }}" class="btn btn-secondary">
                     ➕ Add Member
                 </a>
+                <form
+                    method="POST"
+                    action="{{ url_for('delete_group', group_id=group.id) }}"
+                    class="inline-action-form"
+                    onsubmit="return confirm('¿Seguro que querés eliminar este grupo y todos sus datos?');"
+                >
+                    <button type="submit" class="btn btn-outline btn-danger">
+                        Delete Group
+                    </button>
+                </form>
             </section>
 
             <!-- Balances Section -->
@@ -87,6 +97,26 @@
                                 </div>
                                 <div class="expense-detail">
                                     Paid by: <strong>{{ payer.name if payer else 'Unknown' }}</strong>
+                                </div>
+                                {% if expense.date %}
+                                    <div class="expense-detail">
+                                        Date: <strong>{{ expense.date }}</strong>
+                                    </div>
+                                {% endif %}
+                                <div class="expense-actions">
+                                    <a href="{{ url_for('edit_expense', expense_id=expense.id) }}" class="btn btn-outline">
+                                        Edit
+                                    </a>
+                                    <form
+                                        method="POST"
+                                        action="{{ url_for('delete_expense', expense_id=expense.id) }}"
+                                        class="inline-action-form"
+                                        onsubmit="return confirm('¿Seguro que querés eliminar este gasto?');"
+                                    >
+                                        <button type="submit" class="btn btn-outline btn-danger">
+                                            Delete
+                                        </button>
+                                    </form>
                                 </div>
                             </div>
                         {% endfor %}

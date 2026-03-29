@@ -38,6 +38,16 @@
                             <a href="{{ url_for('group_detail', group_id=group.id) }}" class="btn btn-primary">
                                 View Group
                             </a>
+                            <form
+                                method="POST"
+                                action="{{ url_for('delete_group', group_id=group.id) }}"
+                                class="inline-action-form"
+                                onsubmit="return confirm('¿Seguro que querés eliminar este grupo y todos sus datos?');"
+                            >
+                                <button type="submit" class="btn btn-outline btn-danger">
+                                    Delete Group
+                                </button>
+                            </form>
                         </div>
                     {% endfor %}
                 </div>

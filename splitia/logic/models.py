@@ -145,6 +145,46 @@ def delete_expense(expense_id):
     data_access.delete_expense_record(expense_id)
 
 
+def update_expense(expense_id, description, total_amount, payer_id, group_id, participants, expense_date=None):
+    """
+    Update an existing expense and fully replace its participant shares.
+    """
+    expense = data_access.fetch_expense(expense_id)
+    if not expense:
+        raise ValueError(f"Expense {expense_id} does not exist")
+
+    if expense['group_id'] != group_id:
+        raise ValueError("Expense does not belong to this group")
+
+    if not data_access.fetch_user(payer_id):
+        raise ValueError(f"User {payer_id} does not exist")
+    if not data_access.fetch_group(group_id):
+        raise ValueError(f"Group {group_id} does not exist")
+
+    data_access.update_expense_record(
+        expense_id,
+        description,
+        total_amount,
+        payer_id,
+        expense_date=expense_date,
+    )
+
+    data_access.delete_expense_shares_for_expense(expense_id)
+
+    if isinstance(participants, dict):
+        participant_items = participants.items()
+    else:
+        share_amount = total_amount / len(participants)
+        participant_items = [(participant_id, share_amount) for participant_id in participants]
+
+    for participant_id, share_amount in participant_items:
+        if not data_access.fetch_user(int(participant_id)):
+            raise ValueError(f"User {participant_id} does not exist")
+        create_expense_share(expense_id, int(participant_id), float(share_amount))
+
+    return expense_id
+
+
 # ============================================================================
 # EXPENSE SHARE FUNCTIONS
 # ============================================================================

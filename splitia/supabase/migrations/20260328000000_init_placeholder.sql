@@ -1,9 +1,3 @@
--- Placeholder migration for future Supabase CLI usage.
--- After running `supabase init`, replace this with real migrations.
--- You can start from database/schema.sql.
-
--- Example:
--- CREATE TABLE groups (...);
--- CREATE TABLE users (...);
--- CREATE TABLE expenses (...);
--- CREATE TABLE expense_shares (...);
+-- Historical placeholder migration kept to match remote migration history.
+-- The real incremental change for active/inactive groups lives in:
+-- 20260328130000_add_group_deactivated_at.sql

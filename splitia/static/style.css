@@ -592,6 +592,11 @@ section.section h2 {
     color: #333;
 }
 
+.group-card .btn {
+    margin-right: 8px;
+    margin-top: 8px;
+}
+
 .group-members {
     color: #666;
     margin: 10px 0;
@@ -697,6 +702,26 @@ section.section h2 {
 .expense-detail {
     color: #666;
     font-size: 0.95rem;
+}
+
+.expense-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+
+.inline-action-form {
+    display: inline-block;
+}
+
+.btn-danger {
+    color: #cb2431;
+    border-color: #fecaca;
+}
+
+.btn-danger:hover {
+    background: #fff1f2;
 }
 
 /* ============================================================================

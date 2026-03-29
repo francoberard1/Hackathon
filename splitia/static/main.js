@@ -8,7 +8,7 @@
 // ============================================================================
 
 document.addEventListener('DOMContentLoaded', function() {
-    const expenseForm = document.querySelector('form');
+    const expenseForm = document.querySelector('form.form');
     const participantCheckboxes = document.querySelectorAll('input[name^="participant_"]');
     const totalAmountInput = document.getElementById('total_amount');
     const shareInputs = document.querySelectorAll('input[name^="share_amount_"]');

@@ -48,6 +48,38 @@ def _parse_request_group_members(payload, form_data):
     return [str(member).strip() for member in raw_members if str(member).strip()]
 
 
+def _expense_form_context(group, members, expense=None, error_message=None, is_edit=False):
+    selected_participants = {}
+
+    if expense:
+        shares = models.get_shares_for_expense(expense['id'])
+        selected_participants = {
+            share['user_id']: float(share['amount']) for share in shares
+        }
+
+    return {
+        'group': group,
+        'members': members,
+        'expense': expense,
+        'selected_participants': selected_participants,
+        'error_message': error_message,
+        'is_edit': is_edit,
+    }
+
+
+def _render_expense_form(group, members, expense=None, error_message=None, is_edit=False, status_code=200):
+    return render_template(
+        'add_expense.html',
+        **_expense_form_context(
+            group,
+            members,
+            expense=expense,
+            error_message=error_message,
+            is_edit=is_edit,
+        ),
+    ), status_code
+
+
 def create_app():
     """
     Application factory used by:
@@ -103,6 +135,20 @@ def register_routes(flask_app):
             # If name is empty, show form again
 
         return render_template('add_group.html')
+
+
+    @flask_app.route('/group/<int:group_id>/delete', methods=['POST'])
+    def delete_group(group_id):
+        group = models.get_group(group_id)
+        if not group:
+            return 'Group not found', 404
+
+        try:
+            models.delete_group(group_id)
+        except Exception:
+            return 'No pudimos eliminar el grupo.', 502
+
+        return redirect(url_for('index'))
 
 
     @flask_app.route('/group/<int:group_id>')
@@ -201,67 +247,67 @@ def register_routes(flask_app):
                     try:
                         share_amount = float(share_amount_raw or '0')
                     except ValueError:
-                        return render_template(
-                            'add_expense.html',
-                            group=group,
-                            members=members,
+                        return _render_expense_form(
+                            group,
+                            members,
                             error_message=f'El monto para {member["name"]} no es válido.',
-                        ), 400
+                            status_code=400,
+                        )
 
                     participant_shares[member['id']] = share_amount
 
             if not description:
-                return render_template(
-                    'add_expense.html',
-                    group=group,
-                    members=members,
+                return _render_expense_form(
+                    group,
+                    members,
                     error_message='Completá la descripción del gasto.',
-                ), 400
+                    status_code=400,
+                )
 
             try:
                 payer_id = int(payer_id_raw)
             except ValueError:
-                return render_template(
-                    'add_expense.html',
-                    group=group,
-                    members=members,
+                return _render_expense_form(
+                    group,
+                    members,
                     error_message='Seleccioná quién pagó antes de agregar el gasto.',
-                ), 400
+                    status_code=400,
+                )
 
             if not participant_shares:
-                return render_template(
-                    'add_expense.html',
-                    group=group,
-                    members=members,
+                return _render_expense_form(
+                    group,
+                    members,
                     error_message='Seleccioná al menos una persona para dividir el gasto.',
-                ), 400
+                    status_code=400,
+                )
 
             try:
                 total_amount = float(total_amount_str)
             except ValueError:
-                return render_template(
-                    'add_expense.html',
-                    group=group,
-                    members=members,
+                return _render_expense_form(
+                    group,
+                    members,
                     error_message='El monto total no es válido.',
-                ), 400
+                    status_code=400,
+                )
 
             if any(share_amount < 0 for share_amount in participant_shares.values()):
-                return render_template(
-                    'add_expense.html',
-                    group=group,
-                    members=members,
+                return _render_expense_form(
+                    group,
+                    members,
                     error_message='Los montos por persona no pueden ser negativos.',
-                ), 400
+                    status_code=400,
+                )
 
             shares_total = round(sum(participant_shares.values()), 2)
             if abs(shares_total - total_amount) > 0.01:
-                return render_template(
-                    'add_expense.html',
-                    group=group,
-                    members=members,
+                return _render_expense_form(
+                    group,
+                    members,
                     error_message='La suma de los montos por persona debe coincidir con el total del gasto.',
-                ), 400
+                    status_code=400,
+                )
 
             try:
                 models.create_expense(
@@ -274,21 +320,170 @@ def register_routes(flask_app):
                 )
                 return redirect(url_for('group_detail', group_id=group_id))
             except ValueError as exc:
-                return render_template(
-                    'add_expense.html',
-                    group=group,
-                    members=members,
+                return _render_expense_form(
+                    group,
+                    members,
                     error_message=str(exc),
-                ), 400
+                    status_code=400,
+                )
             except Exception:
-                return render_template(
-                    'add_expense.html',
-                    group=group,
-                    members=members,
+                return _render_expense_form(
+                    group,
+                    members,
                     error_message='No pudimos guardar el gasto. Revisá payer, participantes y monto, y probá de nuevo.',
-                ), 502
+                    status_code=502,
+                )
 
-        return render_template('add_expense.html', group=group, members=members)
+        return _render_expense_form(group, members)
+
+
+    @flask_app.route('/expense/<int:expense_id>/edit', methods=['GET', 'POST'])
+    def edit_expense(expense_id):
+        expense = models.get_expense(expense_id)
+        if not expense:
+            return 'Expense not found', 404
+
+        group = models.get_group(expense['group_id'])
+        members = models.get_users_in_group(expense['group_id'])
+
+        if not group:
+            return 'Group not found', 404
+
+        if request.method == 'POST':
+            description = request.form.get('description', '').strip()
+            total_amount_str = request.form.get('total_amount', '0')
+            payer_id_raw = request.form.get('payer_id', '').strip()
+            expense_date = request.form.get('expense_date', '').strip()
+
+            participant_shares = {}
+            for member in members:
+                if request.form.get(f'participant_{member["id"]}'):
+                    share_amount_raw = request.form.get(f'share_amount_{member["id"]}', '0').strip()
+                    try:
+                        share_amount = float(share_amount_raw or '0')
+                    except ValueError:
+                        return _render_expense_form(
+                            group,
+                            members,
+                            expense=expense,
+                            error_message=f'El monto para {member["name"]} no es válido.',
+                            is_edit=True,
+                            status_code=400,
+                        )
+
+                    participant_shares[member['id']] = share_amount
+
+            if not description:
+                return _render_expense_form(
+                    group,
+                    members,
+                    expense=expense,
+                    error_message='Completá la descripción del gasto.',
+                    is_edit=True,
+                    status_code=400,
+                )
+
+            try:
+                payer_id = int(payer_id_raw)
+            except ValueError:
+                return _render_expense_form(
+                    group,
+                    members,
+                    expense=expense,
+                    error_message='Seleccioná quién pagó antes de guardar el gasto.',
+                    is_edit=True,
+                    status_code=400,
+                )
+
+            if not participant_shares:
+                return _render_expense_form(
+                    group,
+                    members,
+                    expense=expense,
+                    error_message='Seleccioná al menos una persona para dividir el gasto.',
+                    is_edit=True,
+                    status_code=400,
+                )
+
+            try:
+                total_amount = float(total_amount_str)
+            except ValueError:
+                return _render_expense_form(
+                    group,
+                    members,
+                    expense=expense,
+                    error_message='El monto total no es válido.',
+                    is_edit=True,
+                    status_code=400,
+                )
+
+            if any(share_amount < 0 for share_amount in participant_shares.values()):
+                return _render_expense_form(
+                    group,
+                    members,
+                    expense=expense,
+                    error_message='Los montos por persona no pueden ser negativos.',
+                    is_edit=True,
+                    status_code=400,
+                )
+
+            shares_total = round(sum(participant_shares.values()), 2)
+            if abs(shares_total - total_amount) > 0.01:
+                return _render_expense_form(
+                    group,
+                    members,
+                    expense=expense,
+                    error_message='La suma de los montos por persona debe coincidir con el total del gasto.',
+                    is_edit=True,
+                    status_code=400,
+                )
+
+            try:
+                models.update_expense(
+                    expense_id,
+                    description,
+                    total_amount,
+                    payer_id,
+                    expense['group_id'],
+                    participant_shares,
+                    expense_date=expense_date or None,
+                )
+                return redirect(url_for('group_detail', group_id=expense['group_id']))
+            except ValueError as exc:
+                return _render_expense_form(
+                    group,
+                    members,
+                    expense=expense,
+                    error_message=str(exc),
+                    is_edit=True,
+                    status_code=400,
+                )
+            except Exception:
+                return _render_expense_form(
+                    group,
+                    members,
+                    expense=expense,
+                    error_message='No pudimos actualizar el gasto. Revisá payer, participantes y monto, y probá de nuevo.',
+                    is_edit=True,
+                    status_code=502,
+                )
+
+        return _render_expense_form(group, members, expense=expense, is_edit=True)
+
+
+    @flask_app.route('/expense/<int:expense_id>/delete', methods=['POST'])
+    def delete_expense(expense_id):
+        expense = models.get_expense(expense_id)
+        if not expense:
+            return 'Expense not found', 404
+
+        group_id = expense['group_id']
+        try:
+            models.delete_expense(expense_id)
+        except Exception:
+            return 'No pudimos eliminar el gasto.', 502
+
+        return redirect(url_for('group_detail', group_id=group_id))
 
 
     @flask_app.route('/api/audio/draft', methods=['POST'])
