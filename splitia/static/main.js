@@ -2,175 +2,511 @@
 // MAIN.JS
 // ============================================================================
 // Minimal JavaScript for SplitIA.
-// This file contains simple interactions to enhance UX.
-// 
-// Note: We keep this VERY minimal:
-// - Form validation
-// - Helper UI enhancements
-// - No complex frameworks like React
+// This file contains:
+// - expense form validation
+// - chat-like assistant flow for text, audio recording, and file uploads
 // ============================================================================
 
-
-// ============================================================================
-// FORM VALIDATION AND HELPERS
-// ============================================================================
-
-/**
- * When adding an expense, ensure the user selected at least one participant
- */
 document.addEventListener('DOMContentLoaded', function() {
     const expenseForm = document.querySelector('form');
-    
-    // Check if we're on the add_expense page by looking for participant checkboxes
     const participantCheckboxes = document.querySelectorAll('input[name^="participant_"]');
-    
+    const totalAmountInput = document.getElementById('total_amount');
+    const shareInputs = document.querySelectorAll('input[name^="share_amount_"]');
+    const shareSumHint = document.getElementById('draft-share-sum-hint');
+
     if (participantCheckboxes.length > 0 && expenseForm) {
-        // This is the add expense form
         expenseForm.addEventListener('submit', function(event) {
-            // Check if at least one participant is selected
             const anyChecked = Array.from(participantCheckboxes).some(cb => cb.checked);
-            
             if (!anyChecked) {
                 event.preventDefault();
                 alert('⚠️ Please select at least one participant for the expense!');
             }
         });
     }
-});
 
+    function updateShareSumHint() {
+        if (!shareSumHint || !totalAmountInput) {
+            return;
+        }
 
-/**
- * Format currency amounts in the UI
- * If you want to add thousands separators, this is the place
- */
-function formatCurrency(amount) {
-    return '$' + parseFloat(amount).toFixed(2);
-}
+        const totalAmount = Number(totalAmountInput.value || 0);
+        const selectedShares = Array.from(shareInputs).reduce(function(sum, input) {
+            if (input.disabled) {
+                return sum;
+            }
+            return sum + Number(input.value || 0);
+        }, 0);
+        const difference = Number((totalAmount - selectedShares).toFixed(2));
 
+        if (!totalAmount && !selectedShares) {
+            shareSumHint.textContent = '';
+            shareSumHint.classList.remove('assistant-error');
+            return;
+        }
 
-/**
- * Copy transaction text to clipboard
- * Useful for sharing settle instructions
- */
-function copyToClipboard(text) {
-    if (navigator.clipboard) {
-        navigator.clipboard.writeText(text).then(function() {
-            alert('✅ Copied to clipboard!');
-        });
+        if (Math.abs(difference) <= 0.01) {
+            shareSumHint.textContent = 'La suma por persona coincide con el total.';
+            shareSumHint.classList.remove('assistant-error');
+            return;
+        }
+
+        shareSumHint.textContent = 'La suma por persona da $' + selectedShares.toFixed(2) + ' y difiere del total por $' + Math.abs(difference).toFixed(2) + '.';
+        shareSumHint.classList.add('assistant-error');
     }
-}
 
+    participantCheckboxes.forEach(function(checkbox) {
+        checkbox.addEventListener('change', function() {
+            const shareInput = document.getElementById('share_amount_' + checkbox.id.replace('participant_', ''));
+            if (!shareInput) {
+                return;
+            }
+            shareInput.disabled = !checkbox.checked;
+            if (!checkbox.checked) {
+                shareInput.value = '';
+            }
+            updateShareSumHint();
+        });
+    });
 
-/**
- * Simple tooltip/info pop-ups
- * Example: hover over a term to see explanation
- */
+    shareInputs.forEach(function(input) {
+        input.addEventListener('input', updateShareSumHint);
+    });
+
+    if (totalAmountInput) {
+        totalAmountInput.addEventListener('input', updateShareSumHint);
+    }
+});
+
 document.addEventListener('DOMContentLoaded', function() {
-    const infoElements = document.querySelectorAll('[data-tooltip]');
-    infoElements.forEach(element => {
-        element.addEventListener('hover', function(e) {
-            const tooltip = this.getAttribute('data-tooltip');
-            console.log(tooltip);
+    const guardedForms = document.querySelectorAll('form[data-single-submit="true"]');
+
+    guardedForms.forEach(function(form) {
+        let submitted = false;
+
+        form.addEventListener('submit', function(event) {
+            if (submitted) {
+                event.preventDefault();
+                return;
+            }
+
+            submitted = true;
+
+            const submitButton = form.querySelector('button[type="submit"]');
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.textContent = 'Saving...';
+            }
         });
     });
 });
 
 
-// ============================================================================
-// FUTURE ENHANCEMENTS (Placeholders)
-// ============================================================================
+document.addEventListener('DOMContentLoaded', function() {
+    const assistantThread = document.getElementById('assistant-thread');
+    const composerInput = document.getElementById('assistant-composer-input');
+    const composerSendBtn = document.getElementById('composer-send-btn');
+    const micRecordBtn = document.getElementById('mic-record-btn');
+    const recordOptionBtn = document.getElementById('record-option-btn');
+    const writeOptionBtn = document.getElementById('write-option-btn');
+    const uploadAudioBtn = document.getElementById('upload-audio-btn');
+    const uploadTicketBtn = document.getElementById('upload-ticket-btn');
+    const audioFileInput = document.getElementById('audio_file');
+    const receiptInput = document.getElementById('receipt_image');
+    const attachmentSummary = document.getElementById('attachment-summary');
+    const recordingIndicator = document.getElementById('recording-indicator');
+    const recordingTimer = document.getElementById('recording-timer');
+    const transcriptPreviewCard = document.getElementById('transcript-preview-card');
+    const transcriptPreviewText = document.getElementById('transcript_preview_text');
 
-/**
- * PLACEHOLDER: Real-time expense preview
- * As user types amount, show preview of what each person owes
- */
-function previewExpenseShares() {
-    // TODO: Implement this when complex features needed
-    // - Read amount from input
-    // - Count checked participants
-    // - Show live preview: "Each person pays $X"
-}
+    if (
+        !assistantThread ||
+        !composerInput ||
+        !composerSendBtn ||
+        !micRecordBtn ||
+        !audioFileInput ||
+        !receiptInput ||
+        !transcriptPreviewCard ||
+        !transcriptPreviewText
+    ) {
+        return;
+    }
 
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let currentTranscript = '';
+    let currentTranscriptSource = 'typed';
+    let recordingStream = null;
+    let recordingIntervalId = null;
+    let recordingStartedAt = null;
 
-/**
- * PLACEHOLDER: Delete functionality
- * Users might want to delete expenses or members
- */
-function deleteExpense(expenseId) {
-    // TODO: Implement with a confirmation dialog
-    // if (confirm('Delete this expense?')) {
-    //     // Send DELETE request to server
-    // }
-}
+    function getRecordingFormat() {
+        if (!window.MediaRecorder || typeof window.MediaRecorder.isTypeSupported !== 'function') {
+            return { mimeType: '', extension: 'webm' };
+        }
 
+        const candidates = [
+            { mimeType: 'audio/webm;codecs=opus', extension: 'webm' },
+            { mimeType: 'audio/webm', extension: 'webm' },
+            { mimeType: 'audio/mp4', extension: 'm4a' },
+            { mimeType: 'audio/ogg;codecs=opus', extension: 'ogg' },
+            { mimeType: 'audio/ogg', extension: 'ogg' }
+        ];
 
-/**
- * PLACEHOLDER: Edit functionality
- * Allow editing expenses or members
- */
-function editExpense(expenseId) {
-    // TODO: Implement when needed
-    // - Load expense data
-    // - Show edit form
-    // - Submit changes
-}
+        return candidates.find(function(candidate) {
+            return window.MediaRecorder.isTypeSupported(candidate.mimeType);
+        }) || { mimeType: '', extension: 'webm' };
+    }
 
+    function escapeHtml(value) {
+        return (value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
 
-/**
- * PLACEHOLDER: Auto-select participants
- * Quick button to select/deselect all participants
- */
-function toggleAllParticipants(selectAll) {
-    const checkboxes = document.querySelectorAll('input[name^="participant_"]');
-    checkboxes.forEach(cb => {
-        cb.checked = selectAll;
-    });
-}
-
-
-// ============================================================================
-// KEYBOARD SHORTCUTS (Optional)
-// ============================================================================
-
-/**
- * PLACEHOLDER: Keyboard shortcuts for power users
- * e.g., Ctrl+S to submit form, Escape to cancel
- */
-document.addEventListener('keydown', function(event) {
-    // Ctrl+S or Cmd+S to submit the current form
-    if ((event.ctrlKey || event.metaKey) && event.key === 's') {
-        event.preventDefault();
-        const form = document.querySelector('form');
-        if (form) {
-            form.submit();
+    function showElement(element) {
+        if (element) {
+            element.classList.remove('assistant-hidden');
         }
     }
-    
-    // Escape to go back
-    if (event.key === 'Escape') {
-        // Optional: navigate back or close modal
-        // window.history.back();
+
+    function hideElement(element) {
+        if (element) {
+            element.classList.add('assistant-hidden');
+        }
     }
+
+    function scrollThreadToBottom() {
+        assistantThread.scrollTop = assistantThread.scrollHeight;
+    }
+
+    function formatDuration(seconds) {
+        const mins = String(Math.floor(seconds / 60)).padStart(2, '0');
+        const secs = String(seconds % 60).padStart(2, '0');
+        return mins + ':' + secs;
+    }
+
+    function appendMessage(role, html) {
+        const article = document.createElement('article');
+        article.className = 'assistant-message ' + (role === 'user' ? 'assistant-message-user' : 'assistant-message-ai');
+        article.innerHTML =
+            '<div class="assistant-avatar">' + (role === 'user' ? 'You' : 'AI') + '</div>' +
+            '<div class="assistant-bubble">' + html + '</div>';
+        assistantThread.appendChild(article);
+        scrollThreadToBottom();
+    }
+
+    function setAttachmentSummary(message, isError) {
+        attachmentSummary.textContent = message;
+        attachmentSummary.classList.toggle('assistant-error', Boolean(isError));
+    }
+
+    function resetRecordingUI() {
+        hideElement(recordingIndicator);
+        micRecordBtn.classList.remove('assistant-icon-btn-recording');
+        micRecordBtn.textContent = '🎤';
+        if (recordingIntervalId) {
+            window.clearInterval(recordingIntervalId);
+            recordingIntervalId = null;
+        }
+        if (recordingTimer) {
+            recordingTimer.textContent = '00:00';
+        }
+    }
+
+    function startRecordingTimer() {
+        recordingStartedAt = Date.now();
+        showElement(recordingIndicator);
+        recordingIntervalId = window.setInterval(function() {
+            const elapsedSeconds = Math.floor((Date.now() - recordingStartedAt) / 1000);
+            recordingTimer.textContent = formatDuration(elapsedSeconds);
+        }, 250);
+    }
+
+    function showTranscriptPreview(transcript, sourceLabel) {
+        currentTranscript = transcript;
+        transcriptPreviewText.textContent = transcript;
+        showElement(transcriptPreviewCard);
+        appendMessage(
+            'assistant',
+            '<p><strong>Transcripción lista.</strong> Ya completé el formulario con esta lectura.</p>' +
+            '<p class="assistant-inline-note">Fuente: ' + escapeHtml(sourceLabel) + '</p>'
+        );
+    }
+
+    function handleParsedDraft(draft) {
+        appendMessage(
+            'assistant',
+            '<p><strong>Formulario completado.</strong> Revisá payer, participantes y montos por persona antes de guardar.</p>'
+        );
+        applyDraftToExpenseForm(draft);
+    }
+
+    function applyDraftToExpenseForm(draft) {
+        const descriptionInput = document.getElementById('description');
+        const totalAmountInput = document.getElementById('total_amount');
+        const payerSelect = document.getElementById('payer_id');
+        const participantCheckboxes = document.querySelectorAll('input[name^="participant_"]');
+        const totalHint = document.getElementById('draft-total-hint');
+        const payerHint = document.getElementById('draft-payer-hint');
+        const participantHint = document.getElementById('draft-participant-hint');
+        const shareSumHint = document.getElementById('draft-share-sum-hint');
+
+        if (descriptionInput && draft.description) {
+            descriptionInput.value = draft.description;
+        }
+
+        if (totalAmountInput && typeof draft.total_amount === 'number') {
+            totalAmountInput.value = draft.total_amount;
+            if (totalHint) {
+                totalHint.textContent = 'Draft currency: ' + (draft.currency || 'ARS');
+            }
+        }
+
+        if (payerSelect && draft.payer_name) {
+            let payerMatched = false;
+
+            Array.from(payerSelect.options).forEach(option => {
+                option.selected = false;
+                if (option.text.trim().toLowerCase() === draft.payer_name.trim().toLowerCase()) {
+                    option.selected = true;
+                    payerMatched = true;
+                }
+            });
+
+            if (payerHint) {
+                payerHint.textContent = payerMatched
+                    ? 'Draft payer matched automatically.'
+                    : 'Draft payer "' + draft.payer_name + '" was not matched to a member yet.';
+            }
+        }
+
+        if (participantCheckboxes.length > 0 && Array.isArray(draft.participants)) {
+            const participantMap = {};
+            draft.participants.forEach(function(participant) {
+                participantMap[participant.name.toLowerCase()] = Number(participant.amount || 0);
+            });
+
+            participantCheckboxes.forEach(function(checkbox) {
+                const label = document.querySelector('label[for="' + checkbox.id + '"]');
+                const checkboxName = label ? label.textContent.trim().toLowerCase() : '';
+                const isSelected = Object.prototype.hasOwnProperty.call(participantMap, checkboxName);
+                const shareInput = document.getElementById('share_amount_' + checkbox.id.replace('participant_', ''));
+
+                checkbox.checked = isSelected;
+                if (shareInput) {
+                    shareInput.disabled = !isSelected;
+                    shareInput.value = isSelected ? participantMap[checkboxName].toFixed(2) : '';
+                }
+            });
+
+            if (participantHint) {
+                if (draft.participants.length > 0) {
+                    participantHint.textContent = 'Draft split: ' + draft.participants.map(function(participant) {
+                        return participant.name + ': $' + Number(participant.amount || 0).toFixed(2);
+                    }).join(' | ');
+                } else {
+                    participantHint.textContent = 'Draft did not detect participants. Please select them manually.';
+                }
+            }
+
+            if (shareSumHint) {
+                const sum = draft.participants.reduce(function(total, participant) {
+                    return total + Number(participant.amount || 0);
+                }, 0);
+                shareSumHint.textContent = 'Montos sugeridos por persona: $' + sum.toFixed(2);
+                shareSumHint.classList.remove('assistant-error');
+            }
+        }
+    }
+
+    async function requestTranscriptFromAudio(file) {
+        const formData = new FormData();
+        formData.append('audio', file);
+
+        const response = await fetch('/api/audio/transcribe', {
+            method: 'POST',
+            body: formData
+        });
+
+        const payload = await response.json();
+        if (!response.ok) {
+            throw new Error(payload.error || 'Audio transcription failed');
+        }
+
+        return payload;
+    }
+
+    async function requestDraftFromTranscript(transcript) {
+        const response = await fetch('/api/audio/parse', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ transcript: transcript })
+        });
+
+        const payload = await response.json();
+        if (!response.ok) {
+            throw new Error(payload.error || 'Transcript parsing failed');
+        }
+
+        return payload;
+    }
+
+    async function handleAudioFile(file, originLabel) {
+        appendMessage(
+            'user',
+            '<p><strong>' + escapeHtml(originLabel) + '</strong></p><p class="assistant-inline-note">' +
+            escapeHtml(file.name || 'audio.webm') + '</p>'
+        );
+        setAttachmentSummary('Transcribiendo audio...', false);
+
+        try {
+            const payload = await requestTranscriptFromAudio(file);
+            currentTranscriptSource = payload.source || 'audio';
+            showTranscriptPreview(payload.transcript, currentTranscriptSource);
+            setAttachmentSummary('Audio transcripto. Completando el formulario automáticamente...', false);
+            const draft = await requestDraftFromTranscript(payload.transcript);
+            handleParsedDraft(draft);
+            setAttachmentSummary('Formulario autocompletado desde el audio. Ajustalo si hace falta.', false);
+        } catch (error) {
+            setAttachmentSummary(error.message, true);
+            appendMessage('assistant', '<p>No pude transcribir ese audio. Probá con otro archivo o escribilo manualmente.</p>');
+        }
+    }
+
+    async function toggleRecording() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+            setAttachmentSummary('Este navegador no soporta grabación desde micrófono. Subí un audio o escribilo manualmente.', true);
+            return;
+        }
+
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+            return;
+        }
+
+        try {
+            recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            recordedChunks = [];
+            const recordingFormat = getRecordingFormat();
+            mediaRecorder = recordingFormat.mimeType
+                ? new MediaRecorder(recordingStream, { mimeType: recordingFormat.mimeType })
+                : new MediaRecorder(recordingStream);
+
+            mediaRecorder.addEventListener('dataavailable', function(event) {
+                if (event.data && event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            });
+
+            mediaRecorder.addEventListener('stop', async function() {
+                resetRecordingUI();
+                if (recordingStream) {
+                    recordingStream.getTracks().forEach(function(track) {
+                        track.stop();
+                    });
+                }
+
+                if (!recordedChunks.length) {
+                    setAttachmentSummary('La grabación salió vacía. Probá de nuevo o subí un audio manualmente.', true);
+                    appendMessage('assistant', '<p>No pude leer nada del audio grabado. Probá otra vez o usá "Subir audio".</p>');
+                    return;
+                }
+
+                const audioBlob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+                const fileExtension = recordingFormat.extension || 'webm';
+                const recordedAudioFile = new File([audioBlob], 'splitia-recording.' + fileExtension, {
+                    type: audioBlob.type || 'audio/webm'
+                });
+
+                await handleAudioFile(recordedAudioFile, 'Audio grabado');
+            });
+
+            mediaRecorder.start(250);
+            micRecordBtn.classList.add('assistant-icon-btn-recording');
+            micRecordBtn.textContent = '■';
+            setAttachmentSummary(
+                'Grabando audio en ' + ((mediaRecorder.mimeType || recordingFormat.mimeType || 'formato automático')) +
+                '... contame quién pagó y quiénes participaron.',
+                false
+            );
+            startRecordingTimer();
+        } catch (_error) {
+            resetRecordingUI();
+            setAttachmentSummary('No pude acceder al micrófono. Revisá los permisos del navegador.', true);
+        }
+    }
+
+    composerSendBtn.addEventListener('click', function() {
+        const text = composerInput.value.trim();
+        if (!text) {
+            setAttachmentSummary('Escribí algo o usá el micrófono para arrancar.', true);
+            return;
+        }
+
+        appendMessage('user', '<p>' + escapeHtml(text) + '</p>');
+        composerInput.value = '';
+        currentTranscriptSource = 'typed';
+        showTranscriptPreview(text, 'texto manual');
+        setAttachmentSummary('Texto recibido. Completando el formulario automáticamente...', false);
+        requestDraftFromTranscript(text)
+            .then(function(draft) {
+                handleParsedDraft(draft);
+                setAttachmentSummary('Formulario autocompletado desde el texto. Ajustalo si hace falta.', false);
+            })
+            .catch(function(error) {
+                setAttachmentSummary(error.message, true);
+                appendMessage('assistant', '<p>No pude estructurar ese texto. Probá escribirlo más explícito.</p>');
+            });
+    });
+
+    composerInput.addEventListener('keydown', function(event) {
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+            composerSendBtn.click();
+        }
+    });
+
+    micRecordBtn.addEventListener('click', toggleRecording);
+    recordOptionBtn.addEventListener('click', toggleRecording);
+
+    writeOptionBtn.addEventListener('click', function() {
+        composerInput.focus();
+        setAttachmentSummary('Escribí el gasto como en un chat. Lo vamos a estructurar y volcar directo al formulario.', false);
+    });
+
+    uploadAudioBtn.addEventListener('click', function() {
+        audioFileInput.click();
+    });
+
+    uploadTicketBtn.addEventListener('click', function() {
+        receiptInput.click();
+    });
+
+    audioFileInput.addEventListener('change', function() {
+        const selectedFile = audioFileInput.files && audioFileInput.files[0];
+        if (!selectedFile) {
+            return;
+        }
+        handleAudioFile(selectedFile, 'Audio subido');
+        audioFileInput.value = '';
+    });
+
+    receiptInput.addEventListener('change', function() {
+        const ticketFile = receiptInput.files && receiptInput.files[0];
+        if (!ticketFile) {
+            setAttachmentSummary('El ticket es opcional y solo queda como referencia visual por ahora.', false);
+            return;
+        }
+
+        appendMessage(
+            'user',
+            '<p><strong>Ticket adjunto</strong></p><p class="assistant-inline-note">' + escapeHtml(ticketFile.name) + '</p>'
+        );
+        setAttachmentSummary('Ticket adjunto como referencia. Ahora podés escribir o grabar el audio igual que antes.', false);
+        scrollThreadToBottom();
+    });
 });
-
-
-// ============================================================================
-// LOGGING / DEBUGGING (Development only)
-// ============================================================================
-
-/**
- * Log page information to console (useful for debugging)
- */
-function logPageInfo() {
-    console.log('=== SplitIA Page Info ===');
-    console.log('URL:', window.location.href);
-    console.log('Page Title:', document.title);
-    
-    const form = document.querySelector('form');
-    if (form) {
-        console.log('Form found:', form.method, form.action);
-    }
-}
-
-// Uncomment to debug
-// logPageInfo();

@@ -14,18 +14,27 @@
 # ============================================================================
 
 import os
+import tempfile
 
 try:
     from dotenv import load_dotenv
 except ImportError:
     # Keep app runnable even before dependencies are installed.
-    def load_dotenv():
+    def load_dotenv(*_args, **_kwargs):
         return False
 
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, jsonify, render_template, request, redirect, url_for
 
 from logic import models
+from logic import parser
 from logic import settlement
+
+
+def _has_ai_parser():
+    return bool(
+        os.getenv('ASSEMBLYAI_API_KEY', '').strip()
+        or os.getenv('OPENAI_API_KEY', '').strip()
+    )
 
 
 def create_app():
@@ -36,7 +45,8 @@ def create_app():
 
     Environment variables are loaded from .env when available.
     """
-    load_dotenv()
+    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    load_dotenv(env_path)
 
     flask_app = Flask(__name__)
 
@@ -135,8 +145,17 @@ def register_routes(flask_app):
             user_name = request.form.get('user_name', '').strip()
 
             if user_name:
-                models.create_user(user_name, group_id)
-                return redirect(url_for('group_detail', group_id=group_id))
+                try:
+                    models.create_user(user_name, group_id)
+                    return redirect(url_for('group_detail', group_id=group_id))
+                except ValueError as exc:
+                    return render_template('add_user.html', group=group, error_message=str(exc)), 400
+                except Exception:
+                    return render_template(
+                        'add_user.html',
+                        group=group,
+                        error_message='No pudimos agregar el miembro. Probá una sola vez más en unos segundos.',
+                    ), 502
 
         return render_template('add_user.html', group=group)
 
@@ -161,26 +180,216 @@ def register_routes(flask_app):
         if request.method == 'POST':
             description = request.form.get('description', '').strip()
             total_amount_str = request.form.get('total_amount', '0')
-            payer_id = int(request.form.get('payer_id', 0))
+            payer_id_raw = request.form.get('payer_id', '').strip()
+            expense_date = request.form.get('expense_date', '').strip()
 
-            # Get participants (which users share this expense)
-            # Form sends participant_<user_id> = "on" for checked boxes
-            participant_ids = []
+            participant_shares = {}
             for member in members:
                 if request.form.get(f'participant_{member["id"]}'):
-                    participant_ids.append(member['id'])
+                    share_amount_raw = request.form.get(f'share_amount_{member["id"]}', '0').strip()
+                    try:
+                        share_amount = float(share_amount_raw or '0')
+                    except ValueError:
+                        return render_template(
+                            'add_expense.html',
+                            group=group,
+                            members=members,
+                            error_message=f'El monto para {member["name"]} no es válido.',
+                        ), 400
 
-            # Validate input
-            if description and total_amount_str and payer_id and participant_ids:
-                try:
-                    total_amount = float(total_amount_str)
-                    models.create_expense(description, total_amount, payer_id, group_id, participant_ids)
-                    return redirect(url_for('group_detail', group_id=group_id))
-                except ValueError:
-                    # Invalid amount, show form again
-                    pass
+                    participant_shares[member['id']] = share_amount
+
+            if not description:
+                return render_template(
+                    'add_expense.html',
+                    group=group,
+                    members=members,
+                    error_message='Completá la descripción del gasto.',
+                ), 400
+
+            try:
+                payer_id = int(payer_id_raw)
+            except ValueError:
+                return render_template(
+                    'add_expense.html',
+                    group=group,
+                    members=members,
+                    error_message='Seleccioná quién pagó antes de agregar el gasto.',
+                ), 400
+
+            if not participant_shares:
+                return render_template(
+                    'add_expense.html',
+                    group=group,
+                    members=members,
+                    error_message='Seleccioná al menos una persona para dividir el gasto.',
+                ), 400
+
+            try:
+                total_amount = float(total_amount_str)
+            except ValueError:
+                return render_template(
+                    'add_expense.html',
+                    group=group,
+                    members=members,
+                    error_message='El monto total no es válido.',
+                ), 400
+
+            if any(share_amount < 0 for share_amount in participant_shares.values()):
+                return render_template(
+                    'add_expense.html',
+                    group=group,
+                    members=members,
+                    error_message='Los montos por persona no pueden ser negativos.',
+                ), 400
+
+            shares_total = round(sum(participant_shares.values()), 2)
+            if abs(shares_total - total_amount) > 0.01:
+                return render_template(
+                    'add_expense.html',
+                    group=group,
+                    members=members,
+                    error_message='La suma de los montos por persona debe coincidir con el total del gasto.',
+                ), 400
+
+            try:
+                models.create_expense(
+                    description,
+                    total_amount,
+                    payer_id,
+                    group_id,
+                    participant_shares,
+                    expense_date=expense_date or None,
+                )
+                return redirect(url_for('group_detail', group_id=group_id))
+            except ValueError as exc:
+                return render_template(
+                    'add_expense.html',
+                    group=group,
+                    members=members,
+                    error_message=str(exc),
+                ), 400
+            except Exception:
+                return render_template(
+                    'add_expense.html',
+                    group=group,
+                    members=members,
+                    error_message='No pudimos guardar el gasto. Revisá payer, participantes y monto, y probá de nuevo.',
+                ), 502
 
         return render_template('add_expense.html', group=group, members=members)
+
+
+    @flask_app.route('/api/audio/draft', methods=['POST'])
+    def create_audio_expense_draft():
+        """
+        Receive an uploaded audio file, transcribe it, and return an expense draft.
+        This endpoint never writes to the database.
+        """
+        audio_file = request.files.get('audio')
+
+        if not audio_file or not audio_file.filename:
+            return jsonify({'error': 'audio file is required in the "audio" form field'}), 400
+
+        suffix = os.path.splitext(audio_file.filename)[1] or '.webm'
+        temp_path = None
+
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+                audio_file.save(temp_file)
+                temp_path = temp_file.name
+
+            transcript, transcription_source = parser.transcribe_audio_with_source(temp_path)
+            draft = parser.parse_transcript(
+                transcript,
+                transcription_used_ai=_has_ai_parser(),
+                transcription_source=transcription_source,
+            )
+            return jsonify({
+                'transcript': transcript,
+                'source': transcription_source,
+                'draft': draft.model_dump(),
+            }), 200
+        except (FileNotFoundError, ValueError) as exc:
+            return jsonify({'error': str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({'error': str(exc)}), 502
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+
+
+    @flask_app.route('/api/audio/transcribe', methods=['POST'])
+    def transcribe_audio_message():
+        """
+        Receive an uploaded audio file and return only the transcript.
+        The UI uses this route to let the user edit the transcript before parsing.
+        """
+        audio_file = request.files.get('audio')
+
+        if not audio_file or not audio_file.filename:
+            return jsonify({'error': 'audio file is required in the "audio" form field'}), 400
+
+        suffix = os.path.splitext(audio_file.filename)[1] or '.webm'
+        temp_path = None
+
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+                audio_file.save(temp_file)
+                temp_path = temp_file.name
+
+            transcript, transcription_source = parser.transcribe_audio_with_source(temp_path)
+            return jsonify({
+                'transcript': transcript,
+                'source': transcription_source,
+            }), 200
+        except (FileNotFoundError, ValueError) as exc:
+            return jsonify({'error': str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({'error': str(exc)}), 502
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+
+
+    @flask_app.route('/api/audio/draft/text', methods=['POST'])
+    def create_text_expense_draft():
+        """
+        Parse user-written explanation text into an expense draft.
+        This keeps the same draft-review flow as audio, without persisting data.
+        """
+        payload = request.get_json(silent=True) or {}
+        explanation_text = (payload.get('text') or request.form.get('text') or '').strip()
+
+        if not explanation_text:
+            return jsonify({'error': 'text is required'}), 400
+
+        draft = parser.parse_transcript(
+            explanation_text,
+            transcription_used_ai=_has_ai_parser(),
+            transcription_source='manual',
+        )
+        return jsonify(draft.model_dump()), 200
+
+
+    @flask_app.route('/api/audio/parse', methods=['POST'])
+    def parse_expense_transcript():
+        """
+        Parse a transcript that the user has already reviewed or edited.
+        This route powers the chat-style transcript confirmation flow.
+        """
+        payload = request.get_json(silent=True) or {}
+        transcript = (payload.get('transcript') or request.form.get('transcript') or '').strip()
+
+        if not transcript:
+            return jsonify({'error': 'transcript is required'}), 400
+
+        draft = parser.parse_transcript(
+            transcript,
+            transcription_used_ai=_has_ai_parser(),
+            transcription_source='edited-transcript',
+        )
+        return jsonify(draft.model_dump()), 200
 
 
 # ============================================================================
@@ -241,4 +450,6 @@ app = create_app()
 if __name__ == '__main__':
     # Run the Flask development server
     # Debug=True means the server reloads when you change code
-    app.run(debug=True, host='127.0.0.1', port=5000)
+    host = os.getenv('HOST', '127.0.0.1')
+    port = int(os.getenv('PORT', '5001'))
+    app.run(debug=True, host=host, port=port)

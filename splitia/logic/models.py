@@ -87,7 +87,7 @@ def delete_user(user_id):
 # EXPENSE FUNCTIONS
 # ============================================================================
 
-def create_expense(description, total_amount, payer_id, group_id, participants):
+def create_expense(description, total_amount, payer_id, group_id, participants, expense_date=None):
     """
     Create a new expense.
     Args:
@@ -95,7 +95,8 @@ def create_expense(description, total_amount, payer_id, group_id, participants):
         total_amount (float): Total cost
         payer_id (int): Who paid? (user ID)
         group_id (int): Which group?
-        participants (list): List of user IDs who share this expense (with equal split)
+        participants (list|dict): Either a list of user IDs for equal split,
+                                  or a dict {user_id: amount} for exact shares
     Returns:
         int: ID of the newly created expense
     """
@@ -107,12 +108,24 @@ def create_expense(description, total_amount, payer_id, group_id, participants):
 
     # Future Supabase note:
     # This can become an INSERT into "expenses" plus many rows in "expense_shares".
-    expense_id = data_access.insert_expense(description, total_amount, payer_id, group_id)
+    expense_id = data_access.insert_expense(
+        description,
+        total_amount,
+        payer_id,
+        group_id,
+        expense_date=expense_date,
+    )
 
-    # Create shares (each participant owes equal amount)
-    share_amount = total_amount / len(participants)
-    for participant_id in participants:
-        create_expense_share(expense_id, participant_id, share_amount)
+    if isinstance(participants, dict):
+        participant_items = participants.items()
+    else:
+        share_amount = total_amount / len(participants)
+        participant_items = [(participant_id, share_amount) for participant_id in participants]
+
+    for participant_id, share_amount in participant_items:
+        if not data_access.fetch_user(int(participant_id)):
+            raise ValueError(f"User {participant_id} does not exist")
+        create_expense_share(expense_id, int(participant_id), float(share_amount))
 
     return expense_id
 

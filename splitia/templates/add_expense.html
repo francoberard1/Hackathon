@@ -1,4 +1,3 @@
-<h1>TEST CAMBIO</h1>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -24,8 +23,86 @@
 
         <!-- Main Content -->
         <main>
-            <section class="section form-section">
-                <form method="POST" class="form">
+            <section class="section form-section expense-form-section">
+                <section class="section assistant-section">
+                    <h2>SplitIA Assistant</h2>
+                    <div class="assistant-chat-shell">
+                        <div id="assistant-thread" class="assistant-thread">
+                            <article class="assistant-message assistant-message-ai">
+                                <div class="assistant-avatar">AI</div>
+                                <div class="assistant-bubble">
+                                    <p>Contame el gasto como si estuvieras en un chat. Podés escribir, grabar un audio o adjuntar un ticket y después corregir la transcripción antes de llenar el gasto.</p>
+                                </div>
+                            </article>
+                        </div>
+
+                        <div id="recording-indicator" class="recording-indicator assistant-hidden">
+                            <div class="recording-badge">Grabando</div>
+                            <div class="recording-wave" aria-hidden="true">
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                            </div>
+                            <div id="recording-timer" class="recording-timer">00:00</div>
+                        </div>
+
+                        <div id="transcript-preview-card" class="transcript-preview-card assistant-hidden">
+                            <label for="transcript_preview_text">Transcripción detectada</label>
+                            <div id="transcript_preview_text" class="transcript-preview-text"></div>
+                        </div>
+
+                        <div class="assistant-attachments">
+                            <input
+                                type="file"
+                                id="audio_file"
+                                name="audio_file"
+                                class="assistant-hidden-input"
+                                accept=".mp3,.wav,.m4a,.ogg,.webm,audio/*"
+                            >
+                            <input
+                                type="file"
+                                id="receipt_image"
+                                name="receipt_image"
+                                class="assistant-hidden-input"
+                                accept="image/*"
+                            >
+                            <div id="attachment-summary" class="assistant-status">
+                                El ticket es opcional. La transcripción se muestra como referencia y el formulario se completa automáticamente.
+                            </div>
+                        </div>
+
+                        <div class="assistant-quick-actions">
+                            <button type="button" id="write-option-btn" class="assistant-chip">Escribir</button>
+                            <button type="button" id="record-option-btn" class="assistant-chip assistant-chip-primary">Grabar audio</button>
+                            <button type="button" id="upload-audio-btn" class="assistant-chip">Subir audio</button>
+                            <button type="button" id="upload-ticket-btn" class="assistant-chip">Subir ticket</button>
+                        </div>
+
+                        <div class="assistant-composer">
+                            <textarea
+                                id="assistant-composer-input"
+                                rows="3"
+                                placeholder="Ejemplo: Cena total 24000 pesos, pagó Juan, Juan debe 12000 y Sofi debe 12000."
+                            ></textarea>
+                            <div class="assistant-composer-actions">
+                                <button type="button" id="composer-send-btn" class="btn btn-primary">Enviar</button>
+                                <button type="button" id="mic-record-btn" class="assistant-icon-btn" aria-label="Grabar audio">
+                                    🎤
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                {% if error_message %}
+                    <div class="error-message">
+                        {{ error_message }}
+                    </div>
+                {% endif %}
+
+                <form method="POST" class="form" data-single-submit="true">
                     <!-- Description Field -->
                     <div class="form-group">
                         <label for="description">What was the expense for?</label>
@@ -50,6 +127,7 @@
                             min="0"
                             required
                         >
+                        <small id="draft-total-hint"></small>
                     </div>
 
                     <!-- Payer Field -->
@@ -61,25 +139,48 @@
                                 <option value="{{ member.id }}">{{ member.name }}</option>
                             {% endfor %}
                         </select>
+                        <small id="draft-payer-hint"></small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="expense_date">Expense date</label>
+                        <input
+                            type="date"
+                            id="expense_date"
+                            name="expense_date"
+                        >
                     </div>
 
                     <!-- Participants Field (Checkboxes) -->
                     <div class="form-group">
                         <label>Who should split this expense?</label>
-                        <div class="checkbox-group">
+                        <div class="split-members-list">
                             {% for member in members %}
-                                <div class="checkbox-item">
-                                    <input 
-                                        type="checkbox" 
-                                        id="participant_{{ member.id }}" 
-                                        name="participant_{{ member.id }}"
-                                        value="on"
+                                <div class="split-member-row" data-member-id="{{ member.id }}">
+                                    <div class="checkbox-item">
+                                        <input 
+                                            type="checkbox" 
+                                            id="participant_{{ member.id }}" 
+                                            name="participant_{{ member.id }}"
+                                            value="on"
+                                        >
+                                        <label for="participant_{{ member.id }}">{{ member.name }}</label>
+                                    </div>
+                                    <input
+                                        type="number"
+                                        id="share_amount_{{ member.id }}"
+                                        name="share_amount_{{ member.id }}"
+                                        class="share-amount-input"
+                                        min="0"
+                                        step="0.01"
+                                        placeholder="0.00"
+                                        disabled
                                     >
-                                    <label for="participant_{{ member.id }}">{{ member.name }}</label>
                                 </div>
                             {% endfor %}
                         </div>
-                        <small>Check each person who shares this cost (split equally)</small>
+                        <small id="draft-participant-hint">Activá a cada persona y ajustá cuánto debe cada una.</small>
+                        <small id="draft-share-sum-hint"></small>
                     </div>
 
                     <!-- Buttons -->

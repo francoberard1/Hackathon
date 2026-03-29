@@ -24,7 +24,10 @@
         <!-- Main Content -->
         <main>
             <section class="section form-section">
-                <form method="POST" class="form">
+                <form method="POST" class="form" data-single-submit="true">
+                    {% if error_message %}
+                        <p class="assistant-status assistant-error">{{ error_message }}</p>
+                    {% endif %}
                     <!-- User Name Field -->
                     <div class="form-group">
                         <label for="user_name">Member Name</label>
@@ -41,7 +44,7 @@
 
                     <!-- Buttons -->
                     <div class="form-actions">
-                        <button type="submit" class="btn btn-success">Add Member</button>
+                        <button type="submit" class="btn btn-success" data-submit-label="Add Member">Add Member</button>
                         <a href="{{ url_for('group_detail', group_id=group.id) }}" class="btn btn-outline">Cancel</a>
                     </div>
                 </form>

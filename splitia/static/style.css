@@ -160,6 +160,10 @@ section.section h2 {
     max-width: 500px;
 }
 
+.expense-form-section {
+    max-width: 760px;
+}
+
 .form {
     display: flex;
     flex-direction: column;
@@ -178,7 +182,8 @@ section.section h2 {
 }
 
 .form-group input,
-.form-group select {
+.form-group select,
+.form-group textarea {
     padding: 12px;
     border: 2px solid #e2e8f0;
     border-radius: 5px;
@@ -188,10 +193,16 @@ section.section h2 {
 }
 
 .form-group input:focus,
-.form-group select:focus {
+.form-group select:focus,
+.form-group textarea:focus {
     outline: none;
     border-color: #667eea;
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.form-group textarea {
+    resize: vertical;
+    min-height: 110px;
 }
 
 .form-group small {
@@ -234,6 +245,322 @@ section.section h2 {
 
 .form-actions .btn {
     flex: 1;
+}
+
+.assistant-section {
+    margin-bottom: 25px;
+}
+
+.assistant-options,
+.assistant-panel,
+.draft-preview,
+.assistant-chat-shell,
+.transcript-editor-card,
+.transcript-preview-card,
+.recording-indicator {
+    margin-top: 15px;
+    padding: 16px;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    background-color: #f8fafc;
+}
+
+.assistant-chat-shell {
+    padding: 18px;
+    background: linear-gradient(180deg, #fbfdff 0%, #f8fafc 100%);
+}
+
+.assistant-thread {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 420px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.assistant-message {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.assistant-message-user {
+    flex-direction: row-reverse;
+}
+
+.assistant-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.assistant-message-ai .assistant-avatar {
+    background: #667eea;
+    color: white;
+}
+
+.assistant-message-user .assistant-avatar {
+    background: #dbeafe;
+    color: #1e3a8a;
+}
+
+.assistant-bubble {
+    max-width: calc(100% - 52px);
+    padding: 14px 16px;
+    border-radius: 18px;
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+}
+
+.assistant-message-ai .assistant-bubble {
+    background: white;
+    border-top-left-radius: 6px;
+}
+
+.assistant-message-user .assistant-bubble {
+    background: #e0ecff;
+    border-top-right-radius: 6px;
+}
+
+.assistant-bubble p + p {
+    margin-top: 8px;
+}
+
+.assistant-inline-note {
+    color: #64748b;
+    font-size: 0.9rem;
+}
+
+.assistant-attachments,
+.assistant-quick-actions,
+.assistant-composer {
+    margin-top: 14px;
+}
+
+.assistant-hidden-input {
+    display: none;
+}
+
+.assistant-quick-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.assistant-chip {
+    border: 1px solid #cbd5e1;
+    background: white;
+    color: #334155;
+    padding: 8px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.assistant-chip:hover {
+    transform: translateY(-1px);
+    border-color: #667eea;
+}
+
+.assistant-chip-primary {
+    background: #eef2ff;
+    color: #4338ca;
+    border-color: #c7d2fe;
+}
+
+.assistant-composer {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    padding: 14px;
+    border-radius: 18px;
+    background: white;
+    border: 2px solid #dbe4f0;
+}
+
+.assistant-composer textarea {
+    flex: 1;
+    border: none;
+    resize: none;
+    min-height: 74px;
+    padding: 0;
+    background: transparent;
+}
+
+.assistant-composer textarea:focus {
+    box-shadow: none;
+}
+
+.assistant-composer-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.assistant-icon-btn {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    border: none;
+    background: #e0ecff;
+    color: #1d4ed8;
+    cursor: pointer;
+    font-size: 1.2rem;
+    font-weight: 700;
+    transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+.assistant-icon-btn:hover {
+    transform: translateY(-1px);
+}
+
+.assistant-icon-btn-recording {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.recording-indicator {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.recording-badge {
+    font-weight: 700;
+    color: #b91c1c;
+}
+
+.recording-wave {
+    display: flex;
+    gap: 4px;
+    align-items: flex-end;
+    height: 28px;
+}
+
+.recording-wave span {
+    width: 5px;
+    height: 10px;
+    border-radius: 999px;
+    background: #ef4444;
+    animation: assistantWave 1.1s ease-in-out infinite;
+}
+
+.recording-wave span:nth-child(2) {
+    animation-delay: 0.1s;
+}
+
+.recording-wave span:nth-child(3) {
+    animation-delay: 0.2s;
+}
+
+.recording-wave span:nth-child(4) {
+    animation-delay: 0.3s;
+}
+
+.recording-wave span:nth-child(5) {
+    animation-delay: 0.4s;
+}
+
+.recording-timer {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    color: #991b1b;
+    font-weight: 700;
+}
+
+.transcript-preview-text {
+    margin-top: 10px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: white;
+    border: 1px solid #dbe4f0;
+    color: #334155;
+    white-space: pre-wrap;
+}
+
+.assistant-hidden {
+    display: none;
+}
+
+.assistant-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+
+.assistant-copy,
+.assistant-status {
+    color: #4a5568;
+    font-size: 0.95rem;
+}
+
+.assistant-status {
+    margin-top: 10px;
+}
+
+.assistant-error {
+    color: #c53030;
+}
+
+.draft-preview h3 {
+    margin-bottom: 10px;
+    color: #333;
+}
+
+.draft-preview pre {
+    background-color: #1a202c;
+    color: #edf2f7;
+    border-radius: 6px;
+    padding: 14px;
+    margin-top: 12px;
+    overflow-x: auto;
+    font-size: 0.9rem;
+}
+
+.split-members-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.split-member-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 140px;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #f8fafc;
+}
+
+.share-amount-input {
+    width: 100%;
+}
+
+.share-amount-input:disabled {
+    background: #edf2f7;
+    color: #94a3b8;
+    cursor: not-allowed;
+}
+
+@keyframes assistantWave {
+    0%, 100% {
+        height: 10px;
+        opacity: 0.5;
+    }
+    50% {
+        height: 28px;
+        opacity: 1;
+    }
 }
 
 /* ============================================================================
