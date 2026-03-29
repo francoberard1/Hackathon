@@ -564,6 +564,128 @@ section.section h2 {
     cursor: not-allowed;
 }
 
+.receipt-review-section {
+    margin-top: 24px;
+    border: 2px solid #dbe4f0;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.receipt-review-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.receipt-review-header h2 {
+    margin-bottom: 6px;
+}
+
+.receipt-review-header p {
+    color: #64748b;
+}
+
+.receipt-review-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.receipt-review-grid-wide {
+    grid-column: 1 / -1;
+}
+
+.receipt-subsection {
+    margin-top: 10px;
+    padding: 18px;
+    border: 1px solid #dbe4f0;
+    border-radius: 14px;
+    background: rgba(248, 250, 252, 0.9);
+}
+
+.receipt-subsection h3 {
+    font-family: 'Oxanium', 'Space Grotesk', sans-serif;
+    margin-bottom: 12px;
+    color: #334155;
+}
+
+.receipt-items-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.receipt-item-row {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(120px, 0.8fr) minmax(180px, 1fr) auto;
+    gap: 12px;
+    align-items: end;
+    padding: 14px;
+    border: 1px solid #dbe4f0;
+    border-radius: 14px;
+    background: white;
+}
+
+.receipt-item-row.is-disabled {
+    opacity: 0.65;
+}
+
+.receipt-item-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #475569;
+    font-size: 0.9rem;
+}
+
+.receipt-row-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.receipt-empty-copy {
+    color: #64748b;
+    font-style: italic;
+}
+
+.receipt-member-checks {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+}
+
+.receipt-member-check {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid #dbe4f0;
+    border-radius: 12px;
+    background: white;
+}
+
+.receipt-share-summary {
+    display: grid;
+    gap: 10px;
+}
+
+.receipt-summary-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: white;
+    border: 1px solid #dbe4f0;
+    font-weight: 600;
+}
+
+.receipt-summary-row.is-muted {
+    color: #64748b;
+}
+
 @keyframes assistantWave {
     0%, 100% {
         height: 10px;
@@ -572,6 +694,21 @@ section.section h2 {
     50% {
         height: 28px;
         opacity: 1;
+    }
+}
+
+@media (max-width: 760px) {
+    .receipt-review-grid,
+    .receipt-item-row {
+        grid-template-columns: 1fr;
+    }
+
+    .receipt-review-header {
+        flex-direction: column;
+    }
+
+    .receipt-row-actions {
+        flex-direction: row;
     }
 }
 

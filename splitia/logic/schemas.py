@@ -2,7 +2,34 @@
 Minimal Pydantic schemas for structured expense draft responses.
 """
 
-from pydantic import BaseModel, Field
+try:
+    from pydantic import BaseModel, Field
+except ImportError:  # pragma: no cover - fallback for environments without pydantic installed
+    class BaseModel:
+        def __init__(self, **kwargs):
+            annotations = getattr(self, '__annotations__', {})
+            for field_name in annotations:
+                default_value = getattr(self.__class__, field_name, None)
+                if field_name in kwargs:
+                    value = kwargs[field_name]
+                elif isinstance(default_value, list):
+                    value = list(default_value)
+                elif isinstance(default_value, dict):
+                    value = dict(default_value)
+                else:
+                    value = default_value
+                setattr(self, field_name, value)
+
+        def model_dump(self):
+            return {
+                field_name: getattr(self, field_name)
+                for field_name in getattr(self, '__annotations__', {})
+            }
+
+    def Field(default=None, default_factory=None):
+        if default_factory is not None:
+            return default_factory()
+        return default
 
 
 class ExpenseParticipantDraft(BaseModel):

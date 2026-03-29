@@ -15,6 +15,7 @@
 
 import os
 import tempfile
+from pathlib import Path
 
 try:
     from dotenv import load_dotenv
@@ -25,9 +26,38 @@ except ImportError:
 
 from flask import Flask, jsonify, render_template, request, redirect, url_for
 
-from logic import models
-from logic import parser
-from logic import settlement
+try:
+    from logic import models
+    from logic import parser
+    from logic import settlement
+    from logic.receipt_review import (
+        ReceiptReviewValidationError,
+        extract_receipt_review_form_state,
+        validate_receipt_review_submission,
+    )
+    from logic.receipt_service import (
+        ReceiptConfigurationError,
+        ReceiptDraftError,
+        ReceiptProviderError,
+        ReceiptValidationError,
+        build_receipt_draft,
+    )
+except ModuleNotFoundError:
+    from splitia.logic import models
+    from splitia.logic import parser
+    from splitia.logic import settlement
+    from splitia.logic.receipt_review import (
+        ReceiptReviewValidationError,
+        extract_receipt_review_form_state,
+        validate_receipt_review_submission,
+    )
+    from splitia.logic.receipt_service import (
+        ReceiptConfigurationError,
+        ReceiptDraftError,
+        ReceiptProviderError,
+        ReceiptValidationError,
+        build_receipt_draft,
+    )
 
 
 def _has_ai_parser():
@@ -48,7 +78,33 @@ def _parse_request_group_members(payload, form_data):
     return [str(member).strip() for member in raw_members if str(member).strip()]
 
 
-def _expense_form_context(group, members, expense=None, error_message=None, is_edit=False):
+def _default_receipt_review_state():
+    return {
+        'description': '',
+        'merchant_name': '',
+        'currency': 'ARS',
+        'subtotal_amount': '',
+        'tax_amount': '',
+        'tip_amount': '',
+        'total_amount': '',
+        'confidence': '',
+        'notes': '',
+        'payer_id': '',
+        'expense_date': '',
+        'selected_tax_participants': [],
+        'selected_tip_participants': [],
+        'items': [],
+    }
+
+
+def _expense_form_context(
+    group,
+    members,
+    expense=None,
+    error_message=None,
+    is_edit=False,
+    receipt_review_state=None,
+):
     selected_participants = {}
 
     if expense:
@@ -64,10 +120,19 @@ def _expense_form_context(group, members, expense=None, error_message=None, is_e
         'selected_participants': selected_participants,
         'error_message': error_message,
         'is_edit': is_edit,
+        'receipt_review_state': receipt_review_state or _default_receipt_review_state(),
     }
 
 
-def _render_expense_form(group, members, expense=None, error_message=None, is_edit=False, status_code=200):
+def _render_expense_form(
+    group,
+    members,
+    expense=None,
+    error_message=None,
+    is_edit=False,
+    receipt_review_state=None,
+    status_code=200,
+):
     return render_template(
         'add_expense.html',
         **_expense_form_context(
@@ -76,6 +141,7 @@ def _render_expense_form(group, members, expense=None, error_message=None, is_ed
             expense=expense,
             error_message=error_message,
             is_edit=is_edit,
+            receipt_review_state=receipt_review_state,
         ),
     ), status_code
 
@@ -88,8 +154,9 @@ def create_app():
 
     Environment variables are loaded from .env when available.
     """
-    env_path = os.path.join(os.path.dirname(__file__), '.env')
-    load_dotenv(env_path)
+    app_dir = Path(__file__).resolve().parent
+    load_dotenv(app_dir / '.env')
+    load_dotenv(app_dir.parent / '.env')
 
     flask_app = Flask(__name__)
 
@@ -104,6 +171,19 @@ def create_app():
 
 def register_routes(flask_app):
     """Register all route handlers in one place to keep app creation clean."""
+
+    def _build_receipt_form_context(group_id, error_message=None, review_state=None):
+        group = models.get_group(group_id)
+        if not group:
+            return None
+
+        members = models.get_users_in_group(group_id)
+        return {
+            'group': group,
+            'members': members,
+            'error_message': error_message,
+            'receipt_review_state': review_state or _default_receipt_review_state(),
+        }
 
 # ============================================================================
 # ROUTES: GROUPS
@@ -485,6 +565,84 @@ def register_routes(flask_app):
             models.delete_expense(expense_id)
         except Exception:
             return 'No pudimos eliminar el gasto.', 502
+
+        return redirect(url_for('group_detail', group_id=group_id))
+
+
+    @flask_app.route('/api/receipt/draft', methods=['POST'])
+    def receipt_draft():
+        """
+        Return a Gemini-generated receipt draft from an uploaded image.
+        """
+        receipt_image = request.files.get('receipt_image') or request.files.get('image')
+
+        try:
+            draft = build_receipt_draft(receipt_image)
+        except ReceiptDraftError as exc:
+            if isinstance(exc, ReceiptValidationError):
+                status_code = 400
+            elif isinstance(exc, ReceiptConfigurationError):
+                status_code = 500
+            elif isinstance(exc, ReceiptProviderError):
+                status_code = 502
+            else:
+                status_code = 502
+            return jsonify({'error': str(exc), 'error_code': exc.error_code}), status_code
+
+        return jsonify(draft), 200
+
+
+    @flask_app.route('/add_expense/<int:group_id>/receipt/review', methods=['POST'])
+    def add_expense_receipt_review(group_id):
+        """
+        Validate a reviewed receipt and create an expense using exact shares.
+        """
+        context = _build_receipt_form_context(
+            group_id,
+            review_state=extract_receipt_review_form_state(request.form),
+        )
+        if not context:
+            return 'Group not found', 404
+
+        try:
+            review_result = validate_receipt_review_submission(
+                request.form,
+                context['members'],
+            )
+        except ReceiptReviewValidationError as exc:
+            return _render_expense_form(
+                context['group'],
+                context['members'],
+                error_message=str(exc),
+                receipt_review_state=context['receipt_review_state'],
+                status_code=400,
+            )
+
+        try:
+            models.create_expense(
+                review_result['description'],
+                review_result['total_amount'],
+                review_result['payer_id'],
+                group_id,
+                review_result['share_amounts_by_user'],
+                expense_date=review_result['expense_date'] or None,
+            )
+        except ValueError as exc:
+            return _render_expense_form(
+                context['group'],
+                context['members'],
+                error_message=str(exc),
+                receipt_review_state=context['receipt_review_state'],
+                status_code=400,
+            )
+        except Exception:
+            return _render_expense_form(
+                context['group'],
+                context['members'],
+                error_message='No pudimos guardar el gasto del ticket. Revisá los items y probá de nuevo.',
+                receipt_review_state=context['receipt_review_state'],
+                status_code=502,
+            )
 
         return redirect(url_for('group_detail', group_id=group_id))
 

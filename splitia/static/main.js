@@ -282,7 +282,6 @@ document.addEventListener('DOMContentLoaded', function() {
         !composerSendBtn ||
         !micRecordBtn ||
         !audioFileInput ||
-        !receiptInput ||
         !transcriptPreviewCard ||
         !transcriptPreviewText
     ) {
@@ -670,9 +669,11 @@ document.addEventListener('DOMContentLoaded', function() {
         audioFileInput.click();
     });
 
-    uploadTicketBtn.addEventListener('click', function() {
-        receiptInput.click();
-    });
+    if (uploadTicketBtn && receiptInput) {
+        uploadTicketBtn.addEventListener('click', function() {
+            receiptInput.click();
+        });
+    }
 
     audioFileInput.addEventListener('change', function() {
         const selectedFile = audioFileInput.files && audioFileInput.files[0];
@@ -683,18 +684,397 @@ document.addEventListener('DOMContentLoaded', function() {
         audioFileInput.value = '';
     });
 
-    receiptInput.addEventListener('change', function() {
-        const ticketFile = receiptInput.files && receiptInput.files[0];
-        if (!ticketFile) {
-            setAttachmentSummary('El ticket es opcional y solo queda como referencia visual por ahora.', false);
+    if (receiptInput) {
+        receiptInput.addEventListener('change', function() {
+            const ticketFile = receiptInput.files && receiptInput.files[0];
+            if (!ticketFile) {
+                setAttachmentSummary('No se seleccionó ningún ticket.', false);
+                return;
+            }
+
+            appendMessage(
+                'user',
+                '<p><strong>Ticket adjunto</strong></p><p class="assistant-inline-note">' + escapeHtml(ticketFile.name) + '</p>'
+            );
+            setAttachmentSummary('Ticket recibido. Extrayendo borrador para revisar items...', false);
+            scrollThreadToBottom();
+        });
+    }
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+    const reviewCard = document.getElementById('receipt-review-card');
+    const reviewForm = document.getElementById('receipt-review-form');
+    const receiptInput = document.getElementById('receipt_image');
+    const attachmentSummary = document.getElementById('attachment-summary');
+    const assistantThread = document.getElementById('assistant-thread');
+    const itemsContainer = document.getElementById('receipt-items');
+    const itemsEmpty = document.getElementById('receipt-items-empty');
+    const addItemButton = document.getElementById('receipt-add-item');
+    const resetButton = document.getElementById('receipt-reset-btn');
+    const shareSummary = document.getElementById('receipt-share-summary');
+    const taxParticipants = document.getElementById('tax-participants');
+    const tipParticipants = document.getElementById('tip-participants');
+    const membersDataElement = document.getElementById('receipt-members-data');
+    const reviewDataElement = document.getElementById('receipt-review-data');
+
+    if (
+        !reviewCard ||
+        !reviewForm ||
+        !receiptInput ||
+        !itemsContainer ||
+        !itemsEmpty ||
+        !addItemButton ||
+        !resetButton ||
+        !shareSummary ||
+        !taxParticipants ||
+        !tipParticipants ||
+        !membersDataElement ||
+        !reviewDataElement
+    ) {
+        return;
+    }
+
+    const members = JSON.parse(membersDataElement.textContent || '[]');
+    const initialReviewState = JSON.parse(reviewDataElement.textContent || '{}');
+
+    function escapeHtml(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function appendAssistantMessage(html) {
+        if (!assistantThread) {
             return;
         }
 
-        appendMessage(
-            'user',
-            '<p><strong>Ticket adjunto</strong></p><p class="assistant-inline-note">' + escapeHtml(ticketFile.name) + '</p>'
+        const article = document.createElement('article');
+        article.className = 'assistant-message assistant-message-ai';
+        article.innerHTML =
+            '<div class="assistant-avatar">AI</div>' +
+            '<div class="assistant-bubble">' + html + '</div>';
+        assistantThread.appendChild(article);
+        assistantThread.scrollTop = assistantThread.scrollHeight;
+    }
+
+    function setAttachmentSummary(message, isError) {
+        if (!attachmentSummary) {
+            return;
+        }
+        attachmentSummary.textContent = message;
+        attachmentSummary.classList.toggle('assistant-error', Boolean(isError));
+    }
+
+    function memberOptions(selectedValue) {
+        const placeholder = '<option value="">Assign participant</option>';
+        return placeholder + members.map(function(member) {
+            const selected = String(selectedValue || '') === String(member.id) ? ' selected' : '';
+            return '<option value="' + member.id + '"' + selected + '>' + escapeHtml(member.name) + '</option>';
+        }).join('');
+    }
+
+    function parseAmount(value) {
+        const amount = Number.parseFloat(value);
+        if (!Number.isFinite(amount) || amount < 0) {
+            return 0;
+        }
+        return Math.round(amount * 100) / 100;
+    }
+
+    function toCents(amount) {
+        return Math.round(parseAmount(amount) * 100);
+    }
+
+    function fromCents(cents) {
+        return (cents / 100).toFixed(2);
+    }
+
+    function setFieldValue(id, value) {
+        const field = document.getElementById(id);
+        if (field) {
+            field.value = value == null ? '' : value;
+        }
+    }
+
+    function renderParticipantCheckboxes(container, fieldName, selectedIds) {
+        container.innerHTML = members.map(function(member) {
+            const checked = selectedIds.includes(String(member.id)) ? ' checked' : '';
+            return (
+                '<label class="receipt-member-check">' +
+                    '<input type="checkbox" name="' + fieldName + '" value="' + member.id + '"' + checked + '>' +
+                    '<span>' + escapeHtml(member.name) + '</span>' +
+                '</label>'
+            );
+        }).join('');
+    }
+
+    function createItemRow(item) {
+        const row = document.createElement('div');
+        row.className = 'receipt-item-row';
+        row.innerHTML =
+            '<div class="form-group">' +
+                '<label>Item name</label>' +
+                '<input type="text" name="item_name[]" value="' + escapeHtml(item.name || '') + '"' + (item.enabled === false ? '' : ' required') + '>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Amount</label>' +
+                '<input type="number" name="item_amount[]" min="0" step="0.01" value="' + escapeHtml(item.amount || '') + '"' + (item.enabled === false ? '' : ' required') + '>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Assigned to</label>' +
+                '<select name="item_user_id[]"' + (item.enabled === false ? '' : ' required') + '>' + memberOptions(item.assigned_user_id) + '</select>' +
+            '</div>' +
+            '<div class="receipt-row-actions">' +
+                '<label class="receipt-item-toggle">' +
+                    '<input type="checkbox" class="receipt-item-enabled"' + (item.enabled === false ? '' : ' checked') + '>' +
+                    '<span>Keep item</span>' +
+                '</label>' +
+                '<input type="hidden" name="item_enabled[]" value="' + (item.enabled === false ? '0' : '1') + '">' +
+                '<button type="button" class="btn btn-outline btn-small receipt-remove-item">Delete</button>' +
+            '</div>';
+
+        function syncEnabledState() {
+            const enabledCheckbox = row.querySelector('.receipt-item-enabled');
+            const enabled = enabledCheckbox.checked;
+            row.classList.toggle('is-disabled', !enabled);
+            row.querySelector('input[name="item_enabled[]"]').value = enabled ? '1' : '0';
+            row.querySelectorAll('input[name="item_name[]"], input[name="item_amount[]"], select[name="item_user_id[]"]').forEach(function(field) {
+                field.disabled = !enabled;
+                field.required = enabled;
+            });
+            updateShareSummary();
+        }
+
+        row.querySelector('.receipt-remove-item').addEventListener('click', function() {
+            row.remove();
+            updateItemsEmptyState();
+            updateShareSummary();
+        });
+
+        row.querySelectorAll('input, select').forEach(function(field) {
+            field.addEventListener('input', updateShareSummary);
+            field.addEventListener('change', updateShareSummary);
+        });
+        row.querySelector('.receipt-item-enabled').addEventListener('change', syncEnabledState);
+
+        itemsContainer.appendChild(row);
+        syncEnabledState();
+        updateItemsEmptyState();
+    }
+
+    function updateItemsEmptyState() {
+        itemsEmpty.style.display = itemsContainer.children.length ? 'none' : 'block';
+    }
+
+    function collectSelectedParticipantIds(fieldName) {
+        return Array.from(reviewForm.querySelectorAll('input[name="' + fieldName + '"]:checked'))
+            .map(function(input) {
+                return Number.parseInt(input.value, 10);
+            })
+            .filter(Number.isInteger);
+    }
+
+    function allocateEvenSplit(shareCents, participantIds, amountCents) {
+        if (!participantIds.length || amountCents <= 0) {
+            return;
+        }
+
+        const sorted = participantIds.slice().sort(function(a, b) {
+            return a - b;
+        });
+        const base = Math.floor(amountCents / sorted.length);
+        const remainder = amountCents % sorted.length;
+        sorted.forEach(function(userId, index) {
+            shareCents[userId] = (shareCents[userId] || 0) + base + (index < remainder ? 1 : 0);
+        });
+    }
+
+    function updateShareSummary() {
+        const shareCents = {};
+        members.forEach(function(member) {
+            shareCents[member.id] = 0;
+        });
+
+        Array.from(itemsContainer.querySelectorAll('.receipt-item-row')).forEach(function(row) {
+            const enabled = row.querySelector('input[name="item_enabled[]"]').value !== '0';
+            if (!enabled) {
+                return;
+            }
+
+            const amount = toCents(row.querySelector('input[name="item_amount[]"]').value);
+            const userId = Number.parseInt(row.querySelector('select[name="item_user_id[]"]').value, 10);
+            if (Number.isInteger(userId)) {
+                shareCents[userId] = (shareCents[userId] || 0) + amount;
+            }
+        });
+
+        allocateEvenSplit(shareCents, collectSelectedParticipantIds('tax_split_participants'), toCents(document.getElementById('tax_amount').value));
+        allocateEvenSplit(shareCents, collectSelectedParticipantIds('tip_split_participants'), toCents(document.getElementById('tip_amount').value));
+
+        const rows = members
+            .map(function(member) {
+                return { member: member, cents: shareCents[member.id] || 0 };
+            })
+            .filter(function(entry) {
+                return entry.cents > 0;
+            });
+
+        const totalPreview = rows.reduce(function(sum, entry) {
+            return sum + entry.cents;
+        }, 0);
+        const targetTotal = toCents(document.getElementById('receipt_total_amount').value);
+
+        if (!rows.length) {
+            shareSummary.innerHTML = '<div class="receipt-summary-row is-muted"><span>No assigned shares yet.</span><span>$0.00</span></div>';
+            return;
+        }
+
+        shareSummary.innerHTML = rows.map(function(entry) {
+            return (
+                '<div class="receipt-summary-row">' +
+                    '<span>' + escapeHtml(entry.member.name) + '</span>' +
+                    '<span>$' + fromCents(entry.cents) + '</span>' +
+                '</div>'
+            );
+        }).join('') +
+            '<div class="receipt-summary-row is-muted"><span>Computed total</span><span>$' + fromCents(totalPreview) + '</span></div>' +
+            '<div class="receipt-summary-row is-muted"><span>Reviewed total</span><span>$' + fromCents(targetTotal) + '</span></div>';
+    }
+
+    function setReviewState(state) {
+        reviewCard.classList.remove('assistant-hidden');
+
+        setFieldValue('receipt_description', state.description || '');
+        setFieldValue('merchant_name', state.merchant_name || '');
+        setFieldValue('currency', state.currency || 'ARS');
+        setFieldValue('confidence', state.confidence || '');
+        setFieldValue('subtotal_amount', state.subtotal_amount || '');
+        setFieldValue('tax_amount', state.tax_amount || '');
+        setFieldValue('tip_amount', state.tip_amount || '');
+        setFieldValue('receipt_total_amount', state.total_amount || '');
+        setFieldValue('notes', state.notes || '');
+        setFieldValue('receipt_payer_id', state.payer_id || '');
+        setFieldValue('receipt_expense_date', state.expense_date || '');
+
+        itemsContainer.innerHTML = '';
+        const items = Array.isArray(state.items) && state.items.length
+            ? state.items
+            : (Array.isArray(state.extracted_items) ? state.extracted_items : []);
+
+        items.forEach(function(item) {
+            createItemRow({
+                name: item.name || '',
+                amount: item.amount != null ? item.amount : '',
+                assigned_user_id: item.assigned_user_id || '',
+                enabled: item.enabled !== false,
+            });
+        });
+
+        renderParticipantCheckboxes(
+            taxParticipants,
+            'tax_split_participants',
+            (state.selected_tax_participants || members.map(function(member) {
+                return String(member.id);
+            })).map(String)
         );
-        setAttachmentSummary('Ticket adjunto como referencia. Ahora podés escribir o grabar el audio igual que antes.', false);
-        scrollThreadToBottom();
+        renderParticipantCheckboxes(
+            tipParticipants,
+            'tip_split_participants',
+            (state.selected_tip_participants || members.map(function(member) {
+                return String(member.id);
+            })).map(String)
+        );
+
+        reviewForm.querySelectorAll(
+            '#tax-participants input, #tip-participants input, #receipt_description, #merchant_name, #currency, #confidence, #subtotal_amount, #tax_amount, #tip_amount, #receipt_total_amount, #receipt_payer_id, #receipt_expense_date, #notes'
+        ).forEach(function(field) {
+            field.addEventListener('input', updateShareSummary);
+            field.addEventListener('change', updateShareSummary);
+        });
+
+        updateItemsEmptyState();
+        updateShareSummary();
+    }
+
+    async function requestReceiptDraft(file) {
+        const formData = new FormData();
+        formData.append('receipt_image', file);
+
+        const response = await fetch('/api/receipt/draft', {
+            method: 'POST',
+            body: formData
+        });
+
+        const payload = await response.json();
+        if (!response.ok) {
+            throw new Error(payload.error || 'Could not extract receipt draft.');
+        }
+
+        return payload;
+    }
+
+    receiptInput.addEventListener('change', function() {
+        const file = receiptInput.files && receiptInput.files[0];
+        if (!file) {
+            return;
+        }
+
+        requestReceiptDraft(file)
+            .then(function(payload) {
+                setReviewState(payload);
+                setAttachmentSummary('Borrador del ticket listo. Revisá items, tax y tip antes de guardar.', false);
+                appendAssistantMessage('<p><strong>Borrador del ticket extraído.</strong> Ya podés revisar cada item y repartir el gasto exacto.</p>');
+            })
+            .catch(function(error) {
+                setAttachmentSummary(error.message || 'No pudimos extraer el ticket.', true);
+                appendAssistantMessage('<p>No pude extraer un borrador usable del ticket. Probá con otra foto o cargá el gasto manualmente.</p>');
+            })
+            .finally(function() {
+                receiptInput.value = '';
+            });
     });
+
+    addItemButton.addEventListener('click', function() {
+        createItemRow({ name: '', amount: '', assigned_user_id: '', enabled: true });
+        updateShareSummary();
+    });
+
+    resetButton.addEventListener('click', function() {
+        reviewCard.classList.add('assistant-hidden');
+        itemsContainer.innerHTML = '';
+        reviewForm.reset();
+        renderParticipantCheckboxes(
+            taxParticipants,
+            'tax_split_participants',
+            members.map(function(member) { return String(member.id); })
+        );
+        renderParticipantCheckboxes(
+            tipParticipants,
+            'tip_split_participants',
+            members.map(function(member) { return String(member.id); })
+        );
+        updateItemsEmptyState();
+        updateShareSummary();
+        setAttachmentSummary('Borrador del ticket descartado. Podés subir otro o seguir con carga manual.', false);
+    });
+
+    if (initialReviewState && Array.isArray(initialReviewState.items) && initialReviewState.items.length) {
+        setReviewState(initialReviewState);
+    } else {
+        renderParticipantCheckboxes(
+            taxParticipants,
+            'tax_split_participants',
+            members.map(function(member) { return String(member.id); })
+        );
+        renderParticipantCheckboxes(
+            tipParticipants,
+            'tip_split_participants',
+            members.map(function(member) { return String(member.id); })
+        );
+        updateShareSummary();
+    }
 });

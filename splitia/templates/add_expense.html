@@ -66,10 +66,14 @@
                                 id="receipt_image"
                                 name="receipt_image"
                                 class="assistant-hidden-input"
-                                accept="image/*"
+                                accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
                             >
                             <div id="attachment-summary" class="assistant-status">
-                                El ticket es opcional. La transcripción se muestra como referencia y el formulario se completa automáticamente.
+                                {% if is_edit %}
+                                    El ticket se usa para crear nuevos gastos desde una foto. En edición seguís teniendo texto y audio.
+                                {% else %}
+                                    El ticket también puede convertirse en un borrador completo para revisar items y repartir exacto antes de guardar.
+                                {% endif %}
                             </div>
                         </div>
 
@@ -77,7 +81,9 @@
                             <button type="button" id="write-option-btn" class="assistant-chip">Escribir</button>
                             <button type="button" id="record-option-btn" class="assistant-chip assistant-chip-primary">Grabar audio</button>
                             <button type="button" id="upload-audio-btn" class="assistant-chip">Subir audio</button>
-                            <button type="button" id="upload-ticket-btn" class="assistant-chip">Subir ticket</button>
+                            {% if not is_edit %}
+                                <button type="button" id="upload-ticket-btn" class="assistant-chip">Subir ticket</button>
+                            {% endif %}
                         </div>
 
                         <div class="assistant-composer">
@@ -213,10 +219,113 @@
                         <a href="{{ url_for('group_detail', group_id=group.id) }}" class="btn btn-outline">Cancel</a>
                     </div>
                 </form>
+
+                {% if not is_edit %}
+                    <section
+                        id="receipt-review-card"
+                        class="section receipt-review-section {% if not receipt_review_state.items %}assistant-hidden{% endif %}"
+                    >
+                        <div class="receipt-review-header">
+                            <div>
+                                <h2>Review Ticket Draft</h2>
+                                <p>Corregí el borrador, asigná cada item y guardá el gasto con montos exactos por persona.</p>
+                            </div>
+                            <button type="button" id="receipt-add-item" class="btn btn-outline btn-small">Add Item</button>
+                        </div>
+
+                        <form
+                            id="receipt-review-form"
+                            method="POST"
+                            class="form"
+                            data-single-submit="true"
+                            action="{{ url_for('add_expense_receipt_review', group_id=group.id) }}"
+                        >
+                            <div class="receipt-review-grid">
+                                <div class="form-group">
+                                    <label for="receipt_description">Description</label>
+                                    <input type="text" id="receipt_description" name="description" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="merchant_name">Merchant</label>
+                                    <input type="text" id="merchant_name" name="merchant_name">
+                                </div>
+                                <div class="form-group">
+                                    <label for="currency">Currency</label>
+                                    <input type="text" id="currency" name="currency" maxlength="3">
+                                </div>
+                                <div class="form-group">
+                                    <label for="confidence">Confidence</label>
+                                    <input type="number" id="confidence" name="confidence" min="0" max="1" step="0.001">
+                                </div>
+                                <div class="form-group">
+                                    <label for="subtotal_amount">Subtotal</label>
+                                    <input type="number" id="subtotal_amount" name="subtotal_amount" min="0" step="0.01">
+                                </div>
+                                <div class="form-group">
+                                    <label for="tax_amount">Tax</label>
+                                    <input type="number" id="tax_amount" name="tax_amount" min="0" step="0.01">
+                                </div>
+                                <div class="form-group">
+                                    <label for="tip_amount">Tip</label>
+                                    <input type="number" id="tip_amount" name="tip_amount" min="0" step="0.01">
+                                </div>
+                                <div class="form-group">
+                                    <label for="receipt_total_amount">Total</label>
+                                    <input type="number" id="receipt_total_amount" name="total_amount" min="0" step="0.01" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="receipt_payer_id">Payer</label>
+                                    <select id="receipt_payer_id" name="payer_id" required>
+                                        <option value="">-- Select payer --</option>
+                                        {% for member in members %}
+                                            <option value="{{ member.id }}">{{ member.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="receipt_expense_date">Expense date</label>
+                                    <input type="date" id="receipt_expense_date" name="expense_date">
+                                </div>
+                                <div class="form-group receipt-review-grid-wide">
+                                    <label for="notes">Notes</label>
+                                    <textarea id="notes" name="notes"></textarea>
+                                </div>
+                            </div>
+
+                            <section class="receipt-subsection">
+                                <h3>Receipt Items</h3>
+                                <div id="receipt-items" class="receipt-items-list"></div>
+                                <p id="receipt-items-empty" class="receipt-empty-copy">No items yet. Upload a ticket or add one manually.</p>
+                            </section>
+
+                            <section class="receipt-subsection">
+                                <h3>Split Tax Equally Across</h3>
+                                <div id="tax-participants" class="receipt-member-checks"></div>
+                            </section>
+
+                            <section class="receipt-subsection">
+                                <h3>Split Tip Equally Across</h3>
+                                <div id="tip-participants" class="receipt-member-checks"></div>
+                            </section>
+
+                            <section class="receipt-subsection">
+                                <h3>Share Preview</h3>
+                                <div id="receipt-share-summary" class="receipt-share-summary"></div>
+                            </section>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-success">Create Expense From Ticket</button>
+                                <button type="button" id="receipt-reset-btn" class="btn btn-outline">Clear Ticket Draft</button>
+                            </div>
+                        </form>
+                    </section>
+                {% endif %}
             </section>
         </main>
     </div>
 
+    <script id="receipt-members-data" type="application/json">{{ members | tojson }}</script>
+    <script id="receipt-review-data" type="application/json">{{ receipt_review_state | tojson }}</script>
     <script src="{{ url_for('static', filename='main.js') }}"></script>
 </body>
 </html>
