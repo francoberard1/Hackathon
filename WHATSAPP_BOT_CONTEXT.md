@@ -7,6 +7,9 @@ Important:
 - This is documentation only.
 - It does not change or integrate with the current web app automatically.
 - It exists so future work can reuse the bot logic without affecting the current Flask + Supabase + Vercel site.
+- Bot number for trial: 
+## +1 (205) 852-2118
+
 
 ## Overview
 
