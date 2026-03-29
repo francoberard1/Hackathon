@@ -8,6 +8,54 @@
 // ============================================================================
 
 document.addEventListener('DOMContentLoaded', function() {
+    const body = document.body;
+    const header = document.querySelector('header');
+    const storageKey = 'splitia-theme';
+
+    function currentTheme() {
+        return body.dataset.theme || 'light';
+    }
+
+    function applyTheme(theme) {
+        body.dataset.theme = theme;
+        try {
+            localStorage.setItem(storageKey, theme);
+        } catch (_error) {
+            // Ignore storage issues in private browsing or restricted environments.
+        }
+
+        const toggle = document.querySelector('[data-theme-toggle]');
+        if (toggle) {
+            toggle.textContent = theme === 'dark' ? '☀️ Light mode' : '🌙 Dark mode';
+        }
+    }
+
+    if (header && !document.querySelector('[data-theme-toggle]')) {
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'theme-toggle';
+        toggle.setAttribute('data-theme-toggle', 'true');
+        header.appendChild(toggle);
+        toggle.addEventListener('click', function() {
+            applyTheme(currentTheme() === 'dark' ? 'light' : 'dark');
+        });
+    }
+
+    let initialTheme = 'light';
+    try {
+        initialTheme = localStorage.getItem(storageKey) || (
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light'
+        );
+    } catch (_error) {
+        initialTheme = 'light';
+    }
+
+    applyTheme(initialTheme);
+});
+
+document.addEventListener('DOMContentLoaded', function() {
     const expenseForm = document.querySelector('form.form');
     const participantCheckboxes = Array.from(document.querySelectorAll('input[name^="participant_"]'));
     const totalAmountInput = document.getElementById('total_amount');

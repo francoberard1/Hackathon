@@ -115,7 +115,8 @@ def register_routes(flask_app):
         Home page: Display all groups.
         """
         all_groups = models.get_all_groups()
-        return render_template('index.html', groups=all_groups)
+        home_stats = models.get_home_stats()
+        return render_template('index.html', groups=all_groups, home_stats=home_stats)
 
 
     @flask_app.route('/add_group', methods=['GET', 'POST'])
@@ -172,13 +173,15 @@ def register_routes(flask_app):
 
         # Get balances for each member
         balances = settlement.calculate_balances(group_id)
+        group_stats = models.get_group_stats(group_id)
 
         return render_template(
             'group.html',
             group=group,
             members=members,
             expenses=expenses,
-            balances=balances
+            balances=balances,
+            group_stats=group_stats,
         )
 
 

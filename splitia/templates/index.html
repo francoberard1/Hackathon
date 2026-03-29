@@ -59,6 +59,54 @@
                     ➕ Create New Group
                 </a>
             </div>
+
+            <section class="section stats-section">
+                <h2>📊 Business Snapshot</h2>
+
+                <div class="stats-grid">
+                    <article class="stat-card">
+                        <span class="stat-label">Active groups</span>
+                        <strong class="stat-value">{{ home_stats.overview.active_groups }}</strong>
+                        <p class="stat-meta">{{ home_stats.overview.archived_groups }} archived</p>
+                    </article>
+                    <article class="stat-card">
+                        <span class="stat-label">Active members</span>
+                        <strong class="stat-value">{{ home_stats.overview.total_members }}</strong>
+                        <p class="stat-meta">Across all active groups</p>
+                    </article>
+                    <article class="stat-card">
+                        <span class="stat-label">Total spent</span>
+                        <strong class="stat-value">${{ "%.2f" | format(home_stats.volume.total_spent) }}</strong>
+                        <p class="stat-meta">Historical volume</p>
+                    </article>
+                    <article class="stat-card">
+                        <span class="stat-label">Avg. expense</span>
+                        <strong class="stat-value">${{ "%.2f" | format(home_stats.volume.average_expense) }}</strong>
+                        <p class="stat-meta">Across all recorded expenses</p>
+                    </article>
+                    <article class="stat-card">
+                        <span class="stat-label">Avg. per active group</span>
+                        <strong class="stat-value">${{ "%.2f" | format(home_stats.volume.average_per_group) }}</strong>
+                        <p class="stat-meta">Useful for business sizing</p>
+                    </article>
+                </div>
+
+                <div class="chart-card chart-card-minimal">
+                    <div class="chart-header">
+                        <h3>Spend evolution</h3>
+                        <span class="chart-caption">Last 7 days</span>
+                    </div>
+                    <div class="mini-bar-chart mini-bar-chart-minimal">
+                        {% for point in home_stats.timeline %}
+                            <div class="chart-bar-item">
+                                <div class="chart-bar" style="height: {{ point.height }}px;"></div>
+                                <span class="chart-bar-value">${{ "%.0f" | format(point.amount) }}</span>
+                                <span class="chart-bar-label">{{ point.label }}</span>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
 

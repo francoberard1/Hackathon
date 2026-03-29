@@ -11,6 +11,7 @@ Why this split helps:
 """
 
 from . import data_access
+from . import stats
 
 
 # ============================================================================
@@ -38,6 +39,11 @@ def get_group(group_id):
 def get_all_groups():
     """Get all groups."""
     return data_access.fetch_all_groups()
+
+
+def get_home_stats():
+    """Get business-facing stats for the home dashboard."""
+    return stats.get_home_stats()
 
 
 def delete_group(group_id):
@@ -138,6 +144,11 @@ def get_expense(expense_id):
 def get_expenses_in_group(group_id):
     """Get all expenses in a group."""
     return data_access.fetch_expenses_in_group(group_id)
+
+
+def get_group_stats(group_id):
+    """Get user-facing stats for a single group."""
+    return stats.get_group_stats(group_id)
 
 
 def delete_expense(expense_id):

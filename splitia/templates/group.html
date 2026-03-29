@@ -136,6 +136,74 @@
                     🔍 Calculate Payments
                 </a>
             </section>
+
+            <section class="section stats-section">
+                <h2>📈 Group Stats</h2>
+
+                <div class="stats-grid">
+                    <article class="stat-card">
+                        <span class="stat-label">Total spent</span>
+                        <strong class="stat-value">${{ "%.2f" | format(group_stats.overview.total_spent) }}</strong>
+                        <p class="stat-meta">{{ group_stats.overview.expense_count }} expenses recorded</p>
+                    </article>
+                    <article class="stat-card">
+                        <span class="stat-label">Average expense</span>
+                        <strong class="stat-value">${{ "%.2f" | format(group_stats.overview.average_expense) }}</strong>
+                        <p class="stat-meta">Per published expense</p>
+                    </article>
+                    <article class="stat-card">
+                        <span class="stat-label">Active days</span>
+                        <strong class="stat-value">{{ group_stats.frequency.active_days }}</strong>
+                        <p class="stat-meta">Days with at least one expense</p>
+                    </article>
+                    <article class="stat-card">
+                        <span class="stat-label">Average gap</span>
+                        <strong class="stat-value">{{ "%.1f" | format(group_stats.frequency.average_gap_days) }}</strong>
+                        <p class="stat-meta">Days between expenses</p>
+                    </article>
+                    <article class="stat-card">
+                        <span class="stat-label">Last activity</span>
+                        <strong class="stat-value stat-value-small">
+                            {{ group_stats.frequency.last_activity if group_stats.frequency.last_activity else 'No activity yet' }}
+                        </strong>
+                        <p class="stat-meta">Most recent expense date</p>
+                    </article>
+                </div>
+
+                <div class="stats-two-column">
+                    <div class="chart-card chart-card-minimal">
+                        <div class="chart-header">
+                            <h3>Who paid more</h3>
+                            <span class="chart-caption">Total paid by member</span>
+                        </div>
+                        <div class="mini-bar-chart mini-bar-chart-minimal">
+                            {% for payer in group_stats.top_payers %}
+                                <div class="chart-bar-item">
+                                    <div class="chart-bar chart-bar-secondary" style="height: {{ payer.height }}px;"></div>
+                                    <span class="chart-bar-value">${{ "%.0f" | format(payer.amount) }}</span>
+                                    <span class="chart-bar-label">{{ payer.name }}</span>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="chart-card chart-card-minimal">
+                        <div class="chart-header">
+                            <h3>Expense frequency</h3>
+                            <span class="chart-caption">Last 7 days</span>
+                        </div>
+                        <div class="mini-bar-chart mini-bar-chart-minimal">
+                            {% for point in group_stats.frequency.timeline %}
+                                <div class="chart-bar-item">
+                                    <div class="chart-bar chart-bar-success" style="height: {{ point.height }}px;"></div>
+                                    <span class="chart-bar-value">${{ "%.0f" | format(point.amount) }}</span>
+                                    <span class="chart-bar-label">{{ point.label }}</span>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </section>
         </main>
 
         <!-- Footer Navigation -->

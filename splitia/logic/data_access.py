@@ -150,6 +150,25 @@ def fetch_all_groups():
     return [group for group in groups.values() if not group.get('deactivated_at')]
 
 
+def fetch_all_groups_including_inactive():
+    """Fetch all groups, including soft-deleted ones."""
+    if _using_supabase():
+        supabase = get_supabase_client()
+        rows = _response_rows(
+            supabase.table('groups')
+            .select('id, name, deactivated_at')
+            .order('id')
+            .execute()
+        )
+        groups_with_members = []
+        for row in rows:
+            members = fetch_users_in_group(row['id'])
+            groups_with_members.append(_to_group(row, members=[member['id'] for member in members]))
+        return groups_with_members
+
+    return list(groups.values())
+
+
 def delete_group_record(group_id):
     """Soft-delete one group record."""
     if _using_supabase():
@@ -302,6 +321,22 @@ def fetch_expenses_in_group(group_id):
         return [_to_expense(row) for row in rows]
 
     return [expense for expense in expenses.values() if expense['group_id'] == group_id]
+
+
+def fetch_all_expenses():
+    """Fetch every expense across all groups."""
+    if _using_supabase():
+        supabase = get_supabase_client()
+        rows = _response_rows(
+            supabase.table('expenses')
+            .select('id, description, total_amount, payer_id, group_id, expense_date')
+            .order('expense_date')
+            .order('id')
+            .execute()
+        )
+        return [_to_expense(row) for row in rows]
+
+    return list(expenses.values())
 
 
 def delete_expense_record(expense_id):
