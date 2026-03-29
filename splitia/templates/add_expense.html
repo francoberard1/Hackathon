@@ -24,6 +24,12 @@
         <!-- Main Content -->
         <main>
             <section class="section form-section">
+                <div style="margin-bottom: 24px; padding: 16px; background: #f8fafc; border-left: 4px solid #667eea; border-radius: 6px;">
+                    <strong>Add from a receipt photo</strong>
+                    <p style="margin: 8px 0 14px; color: #666;">Upload a restaurant receipt, review the extracted draft, and assign each item before saving.</p>
+                    <a href="{{ url_for('add_expense_receipt', group_id=group.id) }}" class="btn btn-secondary">Use Receipt Photo</a>
+                </div>
+
                 <form method="POST" class="form">
                     <!-- Description Field -->
                     <div class="form-group">
@@ -90,6 +96,7 @@
                     <!-- Buttons -->
                     <div class="form-actions">
                         <button type="submit" class="btn btn-success">Add Expense</button>
+                        <a href="{{ url_for('add_expense_receipt', group_id=group.id) }}" class="btn btn-secondary">Receipt Photo</a>
                         <a href="{{ url_for('group_detail', group_id=group.id) }}" class="btn btn-outline">Cancel</a>
                     </div>
                 </form>

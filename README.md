@@ -69,11 +69,13 @@ Template file:
 
 Key variables:
 - `SECRET_KEY`
+- `GEMINI_API_KEY`
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
 
 For local development, app uses a safe default secret if `.env` is missing.
 For production, set a real `SECRET_KEY`.
+For the receipt upload flow, set `GEMINI_API_KEY` in `splitia/.env` or export it in your shell before starting the app.
 
 ## 5. Supabase CLI Workflow (Later)
 

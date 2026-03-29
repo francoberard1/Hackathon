@@ -100,7 +100,15 @@ def _normalize_expense_date(expense_date):
         return date.today().isoformat()
 
 
-def create_expense(description, total_amount, payer_id, group_id, participants, expense_date=None):
+def create_expense(
+    description,
+    total_amount,
+    payer_id,
+    group_id,
+    participants,
+    expense_date=None,
+    share_amounts_by_user=None,
+):
     """
     Create a new expense.
     Args:
@@ -108,8 +116,9 @@ def create_expense(description, total_amount, payer_id, group_id, participants, 
         total_amount (float): Total cost
         payer_id (int): Who paid? (user ID)
         group_id (int): Which group?
-        participants (list): List of user IDs who share this expense (with equal split)
+        participants (list): List of user IDs who share this expense
         expense_date (str | None): Optional ISO date for the expense
+        share_amounts_by_user (dict | None): Exact amount owed by each participant
     Returns:
         int: ID of the newly created expense
     """
@@ -118,6 +127,25 @@ def create_expense(description, total_amount, payer_id, group_id, participants, 
         raise ValueError(f"User {payer_id} does not exist")
     if not data_access.fetch_group(group_id):
         raise ValueError(f"Group {group_id} does not exist")
+
+    if share_amounts_by_user:
+        normalized_share_amounts = {}
+        for participant_id, amount in share_amounts_by_user.items():
+            normalized_share_amounts[int(participant_id)] = round(float(amount), 2)
+
+        participant_ids = list(normalized_share_amounts.keys())
+        if sorted(participant_ids) != sorted(set(participants)):
+            participants = participant_ids
+
+        for participant_id in participants:
+            if not data_access.fetch_user(participant_id):
+                raise ValueError(f"User {participant_id} does not exist")
+
+        shares_total = round(sum(normalized_share_amounts.values()), 2)
+        if round(float(total_amount), 2) != shares_total:
+            raise ValueError("Share amounts must add up to the expense total")
+    else:
+        normalized_share_amounts = None
 
     # Future Supabase note:
     # This can become an INSERT into "expenses" plus many rows in "expense_shares".
@@ -129,10 +157,14 @@ def create_expense(description, total_amount, payer_id, group_id, participants, 
         expense_date=_normalize_expense_date(expense_date)
     )
 
-    # Create shares (each participant owes equal amount)
-    share_amount = total_amount / len(participants)
-    for participant_id in participants:
-        create_expense_share(expense_id, participant_id, share_amount)
+    # Create shares (exact amounts when provided, otherwise equal split)
+    if normalized_share_amounts:
+        for participant_id, amount in normalized_share_amounts.items():
+            create_expense_share(expense_id, participant_id, amount)
+    else:
+        share_amount = total_amount / len(participants)
+        for participant_id in participants:
+            create_expense_share(expense_id, participant_id, share_amount)
 
     return expense_id
 

@@ -14,20 +14,51 @@
 # ============================================================================
 
 import os
+from pathlib import Path
 
 try:
     from dotenv import load_dotenv
 except ImportError:
     # Keep app runnable even before dependencies are installed.
-    def load_dotenv():
+    def load_dotenv(*args, **kwargs):
         return False
 
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, jsonify, render_template, request, redirect, url_for
 
-from logic import models
-from logic import settlement
-from logic.ticket_ocr import extract_text_from_image
-from logic.ticket_parser import parse_ticket_text
+try:
+    from logic import models
+    from logic import settlement
+    from logic.receipt_review import (
+        ReceiptReviewValidationError,
+        extract_receipt_review_form_state,
+        validate_receipt_review_submission,
+    )
+    from logic.receipt_service import (
+        ReceiptDraftError,
+        ReceiptConfigurationError,
+        ReceiptProviderError,
+        ReceiptValidationError,
+        build_receipt_draft,
+    )
+    from logic.ticket_ocr import extract_text_from_image
+    from logic.ticket_parser import parse_ticket_text
+except ModuleNotFoundError:
+    from splitia.logic import models
+    from splitia.logic import settlement
+    from splitia.logic.receipt_review import (
+        ReceiptReviewValidationError,
+        extract_receipt_review_form_state,
+        validate_receipt_review_submission,
+    )
+    from splitia.logic.receipt_service import (
+        ReceiptDraftError,
+        ReceiptConfigurationError,
+        ReceiptProviderError,
+        ReceiptValidationError,
+        build_receipt_draft,
+    )
+    from splitia.logic.ticket_ocr import extract_text_from_image
+    from splitia.logic.ticket_parser import parse_ticket_text
 
 
 def create_app():
@@ -38,7 +69,9 @@ def create_app():
 
     Environment variables are loaded from .env when available.
     """
-    load_dotenv()
+    app_dir = Path(__file__).resolve().parent
+    load_dotenv(app_dir / '.env')
+    load_dotenv(app_dir.parent / '.env')
 
     flask_app = Flask(__name__)
 
@@ -53,6 +86,19 @@ def create_app():
 
 def register_routes(flask_app):
     """Register all route handlers in one place to keep app creation clean."""
+
+    def _build_receipt_template_context(group_id, error_message='', review_state=None):
+        group = models.get_group(group_id)
+        if not group:
+            return None
+
+        members = models.get_users_in_group(group_id)
+        return {
+            'group': group,
+            'members': members,
+            'error_message': error_message,
+            'review_state': review_state or None,
+        }
 
 # ============================================================================
 # ROUTES: GROUPS
@@ -201,6 +247,71 @@ def register_routes(flask_app):
             error_message=''
         )
 
+    @flask_app.route('/api/receipt/draft', methods=['POST'])
+    def receipt_draft():
+        """
+        Return a Gemini-generated receipt draft from an uploaded image.
+        """
+        receipt_image = request.files.get('receipt_image') or request.files.get('image')
+
+        try:
+            draft = build_receipt_draft(receipt_image)
+        except ReceiptDraftError as exc:
+            if isinstance(exc, ReceiptValidationError):
+                status_code = 400
+            elif isinstance(exc, ReceiptConfigurationError):
+                status_code = 500
+            elif isinstance(exc, ReceiptProviderError):
+                status_code = 502
+            else:
+                status_code = 502
+            return jsonify({'error': str(exc), 'error_code': exc.error_code}), status_code
+
+        return jsonify(draft)
+
+    @flask_app.route('/add_expense/<int:group_id>/receipt', methods=['GET'])
+    def add_expense_receipt(group_id):
+        """
+        Show the receipt upload and review flow for a group.
+        """
+        context = _build_receipt_template_context(group_id)
+        if not context:
+            return 'Group not found', 404
+
+        return render_template('add_expense_receipt.html', **context)
+
+    @flask_app.route('/add_expense/<int:group_id>/receipt/review', methods=['POST'])
+    def add_expense_receipt_review(group_id):
+        """
+        Validate a reviewed receipt and create an expense using exact shares.
+        """
+        context = _build_receipt_template_context(
+            group_id,
+            review_state=extract_receipt_review_form_state(request.form),
+        )
+        if not context:
+            return 'Group not found', 404
+
+        try:
+            review_result = validate_receipt_review_submission(
+                request.form,
+                context['members'],
+            )
+        except ReceiptReviewValidationError as exc:
+            context['error_message'] = str(exc)
+            return render_template('add_expense_receipt.html', **context), 400
+
+        models.create_expense(
+            review_result['description'],
+            review_result['total_amount'],
+            review_result['payer_id'],
+            group_id,
+            participants=review_result['participant_ids'],
+            expense_date=review_result['expense_date'],
+            share_amounts_by_user=review_result['share_amounts_by_user'],
+        )
+        return redirect(url_for('group_detail', group_id=group_id))
+
     @flask_app.route('/add_expense/<int:group_id>', methods=['GET', 'POST'])
     def add_expense(group_id):
         """
@@ -217,7 +328,10 @@ def register_routes(flask_app):
         if request.method == 'POST':
             description = request.form.get('description', '').strip()
             total_amount_str = request.form.get('total_amount', '0')
-            payer_id = int(request.form.get('payer_id', 0))
+            try:
+                payer_id = int(request.form.get('payer_id', 0))
+            except (TypeError, ValueError):
+                payer_id = 0
             expense_date = request.form.get('expense_date', '').strip()
 
             # Get participants (which users share this expense)
@@ -228,6 +342,23 @@ def register_routes(flask_app):
                     participant_ids.append(member['id'])
 
             # Validate input
+            share_amounts_by_user = None
+            raw_share_amounts = {}
+            for member in members:
+                share_value = request.form.get(f'share_amount_{member["id"]}', '').strip()
+                if not share_value:
+                    continue
+                try:
+                    amount = float(share_value)
+                except ValueError:
+                    continue
+                if amount > 0:
+                    raw_share_amounts[member['id']] = amount
+
+            if raw_share_amounts:
+                participant_ids = list(raw_share_amounts.keys())
+                share_amounts_by_user = raw_share_amounts
+
             if description and total_amount_str and payer_id and participant_ids:
                 try:
                     total_amount = float(total_amount_str)
@@ -237,7 +368,8 @@ def register_routes(flask_app):
                         payer_id,
                         group_id,
                         participant_ids,
-                        expense_date=expense_date
+                        expense_date=expense_date,
+                        share_amounts_by_user=share_amounts_by_user,
                     )
                     return redirect(url_for('group_detail', group_id=group_id))
                 except ValueError:
